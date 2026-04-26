@@ -17,6 +17,7 @@ dependencies = [
     "python-ulid>=3.0.0",
     "sse-starlette>=2.2.0",
     "langchain-mcp-adapters>=0.2.2",
+    "fastmcp>=3.2.4",
 ]
 
 [dependency-groups]

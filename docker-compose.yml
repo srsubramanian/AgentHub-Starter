@@ -22,9 +22,25 @@ services:
       - ./agent/mcp_servers.json:/app/mcp_servers.json:ro
     env_file:
       - .env
+    depends_on:
+      mcp-http:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  # Example external HTTP MCP server. Demonstrates that the agent can
+  # connect to MCP servers running in separate containers / hosts.
+  # Reachable from the agent at http://mcp-http:8765/mcp
+  mcp-http:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    ports:
+      - "8765:8765"
+    environment:
+      - MCP_HTTP_PORT=8765
+    command: ["uv", "run", "python", "mcp_http_server.py"]

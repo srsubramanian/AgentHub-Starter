@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy this file to mcp_servers.json and remove the entries you don't want. Stdio servers run as subprocesses; HTTP/SSE servers must be started separately.",
+  "_comment": "Copy this file to mcp_servers.json and remove what you don't want. Entries with keys starting with '_' are ignored. Use ${VAR_NAME} anywhere in the config to inject environment variables.",
 
   "demo": {
     "command": "uv",
@@ -17,14 +17,25 @@
     }
   },
 
+  "_comment_remote": "External HTTP MCP server example. The mcp-http service in docker-compose.yml runs mcp_http_server.py and is reachable at http://mcp-http:8765/mcp from the agent container.",
+  "remote": {
+    "url": "http://mcp-http:8765/mcp",
+    "transport": "streamable_http"
+  },
+
+  "_comment_authed_remote": "Real-world remote example with bearer token. Set GITHUB_TOKEN in your env (or .env file) — the ${GITHUB_TOKEN} placeholder is substituted at load time.",
+  "_github_example_disabled": {
+    "url": "https://api.githubcopilot.com/mcp/",
+    "transport": "streamable_http",
+    "headers": {
+      "Authorization": "Bearer ${GITHUB_TOKEN}"
+    }
+  },
+
+  "_comment_filesystem": "Filesystem server requires Node.js — not present in the default agent container. Add Node to the Dockerfile if you want to enable it.",
   "_filesystem_example_disabled": {
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
     "transport": "stdio"
-  },
-
-  "_http_example_disabled": {
-    "url": "http://localhost:8765/mcp",
-    "transport": "streamable_http"
   }
 }

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,32 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
 logger = structlog.get_logger()
+
+_ENV_VAR_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
+
+
+def _substitute_env_vars(value: Any) -> Any:
+    """Recursively replace ${VAR_NAME} with environment variable values.
+
+    Used so MCP configs can reference secrets without hardcoding them:
+        {"headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"}}
+    Missing env vars are replaced with an empty string and a warning logged.
+    """
+    if isinstance(value, str):
+        def replace(match: re.Match[str]) -> str:
+            var_name = match.group(1)
+            env_value = os.environ.get(var_name)
+            if env_value is None:
+                logger.warning("MCP config references undefined env var", var=var_name)
+                return ""
+            return env_value
+
+        return _ENV_VAR_RE.sub(replace, value)
+    if isinstance(value, dict):
+        return {k: _substitute_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_substitute_env_vars(v) for v in value]
+    return value
 
 
 def _load_config() -> dict[str, dict[str, Any]]:
@@ -50,6 +77,8 @@ def _load_config() -> dict[str, dict[str, Any]]:
     try:
         with path.open() as f:
             data: dict[str, dict[str, Any]] = json.load(f)
+        # Substitute ${VAR} placeholders with env var values
+        data = _substitute_env_vars(data)
         logger.info("Loaded MCP config", path=str(path), servers=list(data.keys()))
         return data
     except Exception:
