@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env
+.env.local
+agent/
+.venv
+__pycache__
+*.md
+.github
