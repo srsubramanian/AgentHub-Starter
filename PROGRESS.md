@@ -54,7 +54,28 @@
 
 ## Phase 2 — LangGraph agent + reducer + canvas layout + first widget
 
-**Status:** Not started
+**Status:** Complete
+
+**Deliverables:**
+
+- [x] Pydantic widget schemas in `agent/agent/widgets.py` — 6 types with common base
+- [x] TypeScript mirror in `lib/widgets.ts`
+- [x] LangGraph StateGraph (`agent/agent/graph.py`) — respond → tools → respond loop
+- [x] `MemorySaver` checkpointer wired in
+- [x] `create_summary_card` tool emitting AG-UI `CustomEvent` via `StreamWriter`
+- [x] AG-UI event helpers (`agent/agent/events.py`)
+- [x] FastAPI streaming both `messages` and `custom` stream modes
+- [x] Two-column resizable layout (chat ~30%, canvas ~70%)
+- [x] `agentReducer` handling text + widget actions
+- [x] `useAgent` hook rewritten with `useReducer`
+- [x] Widget registry + `SummaryCardWidget`
+
+**Decisions / notes:**
+
+- LangGraph `astream(stream_mode=["messages", "custom"])` yields `(mode, event)` tuples — messages mode gives LLM token chunks, custom mode gives widget events
+- `AnyMessage` import must be at runtime (not `TYPE_CHECKING`) because LangGraph evaluates TypedDict annotations
+- System prompt instructs the LLM to always create a summary card after answering
+- `react-resizable-panels` uses `orientation` prop, not `direction` (shadcn/ui docs may be outdated)
 
 ---
 
