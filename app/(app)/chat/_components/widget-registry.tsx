@@ -6,15 +6,13 @@ import { LogTailWidget } from "./widgets/log-tail-widget";
 import { ResultsTableWidget } from "./widgets/results-table-widget";
 import { SummaryCardWidget } from "./widgets/summary-card-widget";
 import { TimeseriesChartWidget } from "./widgets/timeseries-chart-widget";
+import { WidgetErrorBoundary } from "./widget-error-boundary";
 
 interface WidgetRendererProps {
   widget: Widget;
 }
 
-/**
- * Maps widget types to their React components.
- */
-export function WidgetRenderer({ widget }: WidgetRendererProps) {
+function WidgetContent({ widget }: WidgetRendererProps) {
   switch (widget.type) {
     case "summary_card":
       return <SummaryCardWidget widget={widget} />;
@@ -35,4 +33,15 @@ export function WidgetRenderer({ widget }: WidgetRendererProps) {
     default:
       return null;
   }
+}
+
+/**
+ * Maps widget types to their React components, wrapped in error boundaries.
+ */
+export function WidgetRenderer({ widget }: WidgetRendererProps) {
+  return (
+    <WidgetErrorBoundary widgetType={widget.type}>
+      <WidgetContent widget={widget} />
+    </WidgetErrorBoundary>
+  );
 }

@@ -23,10 +23,12 @@ from langchain_core.messages import HumanMessage
 from starlette.responses import StreamingResponse
 
 from agent.graph import graph
+from agent.logging_config import setup_logging
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+setup_logging()
 logger = structlog.get_logger()
 
 app = FastAPI(title="AgentHub Starter Agent")
