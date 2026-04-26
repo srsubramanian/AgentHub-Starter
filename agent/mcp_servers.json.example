@@ -1,11 +1,29 @@
 {
-  "_comment": "Copy this file to mcp_servers.json and uncomment a server below to enable it. Stdio servers run as subprocesses; HTTP/SSE servers must be started separately.",
-  "_filesystem_example": {
+  "_comment": "Copy this file to mcp_servers.json and remove the entries you don't want. Stdio servers run as subprocesses; HTTP/SSE servers must be started separately.",
+
+  "demo": {
+    "command": "uv",
+    "args": ["run", "python", "mcp_demo_server.py"],
+    "transport": "stdio"
+  },
+
+  "aws_docs": {
+    "command": "uvx",
+    "args": ["awslabs.aws-documentation-mcp-server@latest"],
+    "transport": "stdio",
+    "env": {
+      "FASTMCP_LOG_LEVEL": "ERROR",
+      "AWS_DOCUMENTATION_PARTITION": "aws"
+    }
+  },
+
+  "_filesystem_example_disabled": {
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
     "transport": "stdio"
   },
-  "_http_example": {
+
+  "_http_example_disabled": {
     "url": "http://localhost:8765/mcp",
     "transport": "streamable_http"
   }
