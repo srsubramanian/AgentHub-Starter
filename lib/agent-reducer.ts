@@ -3,6 +3,7 @@
  * Handles text message events and widget custom events.
  */
 
+import { applyPatch } from "fast-json-patch";
 import type { Widget } from "@/lib/widgets";
 import type { ChatMessage } from "@/lib/types";
 
@@ -79,9 +80,24 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       return { ...state, widgets: [...state.widgets, action.widget] };
 
     case "WIDGET_UPDATE": {
-      // JSON Patch application — for Phase 2, we do a simple merge
-      // Full RFC 6902 patch support comes with fast-json-patch in Phase 3
-      return state;
+      return {
+        ...state,
+        widgets: state.widgets.map((w) => {
+          if (w.id !== action.widgetId) return w;
+          try {
+            const patched = applyPatch(
+              structuredClone(w),
+              action.patch as Parameters<typeof applyPatch>[1],
+              true, // validate
+              false, // don't mutate
+            );
+            return patched.newDocument as Widget;
+          } catch {
+            console.error("Failed to apply widget patch", action.patch);
+            return w;
+          }
+        }),
+      };
     }
 
     case "WIDGET_REMOVE":
