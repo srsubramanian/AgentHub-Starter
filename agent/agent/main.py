@@ -93,16 +93,27 @@ async def stream_agent_response(
 
     try:
         async for chunk in model.astream(lc_messages):
-            if isinstance(chunk, AIMessageChunk) and chunk.content:
-                text = chunk.content if isinstance(chunk.content, str) else ""
-                if text:
-                    yield _sse(
-                        TextMessageContentEvent(
-                            type=EventType.TEXT_MESSAGE_CONTENT,
-                            message_id=message_id,
-                            delta=text,
-                        )
+            if not isinstance(chunk, AIMessageChunk) or not chunk.content:
+                continue
+            # Bedrock Converse returns content as str or list of content blocks
+            if isinstance(chunk.content, str):
+                text = chunk.content
+            elif isinstance(chunk.content, list):
+                text = "".join(
+                    block.get("text", "")
+                    for block in chunk.content
+                    if isinstance(block, dict)
+                )
+            else:
+                continue
+            if text:
+                yield _sse(
+                    TextMessageContentEvent(
+                        type=EventType.TEXT_MESSAGE_CONTENT,
+                        message_id=message_id,
+                        delta=text,
                     )
+                )
     except Exception:
         logger.exception("Error streaming from Bedrock")
         raise
