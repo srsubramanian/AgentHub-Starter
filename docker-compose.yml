@@ -19,6 +19,7 @@ services:
       - "8000:8000"
     volumes:
       - ~/.aws:/root/.aws:ro
+      - ./agent/mcp_servers.json:/app/mcp_servers.json:ro
     env_file:
       - .env
     healthcheck:

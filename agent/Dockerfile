@@ -13,6 +13,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy application code
 COPY agent/ agent/
+COPY mcp_demo_server.py ./
 
 # Install the project itself
 RUN uv sync --frozen --no-dev
