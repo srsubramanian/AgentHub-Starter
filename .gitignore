@@ -53,3 +53,7 @@ next-env.d.ts
 
 # pytest
 .pytest_cache/
+
+# MCP server configs (may contain secrets)
+agent/mcp_servers.json
+!agent/mcp_servers.json.example

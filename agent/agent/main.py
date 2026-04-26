@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -22,16 +23,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage
 from starlette.responses import StreamingResponse
 
-from agent.graph import graph
+from agent.graph import graph, set_mcp_tools
 from agent.logging_config import setup_logging
+from agent.mcp_client import load_mcp_tools
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, AsyncIterator
 
 setup_logging()
 logger = structlog.get_logger()
 
-app = FastAPI(title="AgentHub Starter Agent")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Load MCP tools at startup, register them with the graph."""
+    mcp_tools = await load_mcp_tools()
+    set_mcp_tools(mcp_tools)
+    logger.info("Agent ready", mcp_tool_count=len(mcp_tools))
+    yield
+
+
+app = FastAPI(title="AgentHub Starter Agent", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -16,6 +16,7 @@ dependencies = [
     "jsonpatch>=1.33",
     "python-ulid>=3.0.0",
     "sse-starlette>=2.2.0",
+    "langchain-mcp-adapters>=0.2.2",
 ]
 
 [dependency-groups]

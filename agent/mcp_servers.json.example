@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy this file to mcp_servers.json and uncomment a server below to enable it. Stdio servers run as subprocesses; HTTP/SSE servers must be started separately.",
+  "_filesystem_example": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+    "transport": "stdio"
+  },
+  "_http_example": {
+    "url": "http://localhost:8765/mcp",
+    "transport": "streamable_http"
+  }
+}
