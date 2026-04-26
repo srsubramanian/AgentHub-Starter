@@ -1,8 +1,25 @@
 # AgentHub Starter
 
-A starter agentic application demonstrating the [AG-UI protocol](https://docs.ag-ui.com/introduction), declarative canvas widgets, and a multi-tenant LangGraph backend running on AWS Bedrock.
+A starter agentic application demonstrating the [AG-UI protocol](https://docs.ag-ui.com/introduction), declarative canvas widgets, MCP servers, Anthropic-style Skills, and a LangGraph backend running on AWS Bedrock.
 
-**Reference use case:** CloudWatch Logs Insights query agent with human-in-the-loop approval.
+**Reference use case:** Cloud operations assistant — natural-language questions about AWS resources, logs, costs, and incidents, with results streamed into live canvas widgets.
+
+## 📖 Documentation
+
+Detailed docs live in [`docs/`](./docs/README.md):
+
+- **[Getting Started](./docs/getting-started.md)** — prerequisites, install, first run
+- **[Architecture](./docs/architecture.md)** — high-level design, data flow
+- **[Backend](./docs/backend.md)** — FastAPI + LangGraph internals
+- **[Frontend](./docs/frontend.md)** — Next.js + React UI
+- **[Widgets](./docs/widgets.md)** — canvas widget system
+- **[Tools](./docs/tools.md)** — how the LLM calls AWS, widgets, MCP, skills
+- **[MCP Servers](./docs/mcp-servers.md)** — adding stdio and HTTP MCP servers
+- **[Skills](./docs/skills.md)** — Anthropic-style skills (SKILL.md)
+- **[Configuration](./docs/configuration.md)** — env vars, config files
+- **[Development](./docs/development.md)** — workflow, lint, typecheck
+- **[Deployment](./docs/deployment.md)** — Docker setup
+- **[Troubleshooting](./docs/troubleshooting.md)** — common issues
 
 ## Architecture
 
