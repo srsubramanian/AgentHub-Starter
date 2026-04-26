@@ -60,22 +60,32 @@ def _load_config() -> dict[str, dict[str, Any]]:
 async def load_mcp_tools() -> list[BaseTool]:
     """Connect to all configured MCP servers and return their tools.
 
-    Returns an empty list if no servers are configured or if connection fails.
-    The agent continues working without MCP tools in either case.
+    Each server is loaded independently — one bad server does not block
+    others. Returns an empty list if no servers are configured.
     """
     config = _load_config()
     if not config:
         return []
 
-    try:
-        client = MultiServerMCPClient(config, tool_name_prefix=True)  # type: ignore[arg-type]
-        tools: list[BaseTool] = await client.get_tools()
-        logger.info(
-            "Loaded MCP tools",
-            count=len(tools),
-            tool_names=[t.name for t in tools],
-        )
-        return tools
-    except Exception:
-        logger.exception("Failed to load MCP tools")
-        return []
+    all_tools: list[BaseTool] = []
+    for name, server_config in config.items():
+        if name.startswith("_"):
+            continue
+        try:
+            client = MultiServerMCPClient(
+                {name: server_config},  # type: ignore[dict-item]
+                tool_name_prefix=True,
+            )
+            server_tools: list[BaseTool] = await client.get_tools()
+            logger.info(
+                "Loaded MCP server",
+                server=name,
+                count=len(server_tools),
+                tool_names=[t.name for t in server_tools],
+            )
+            all_tools.extend(server_tools)
+        except Exception:
+            logger.exception("Failed to load MCP server", server=name)
+
+    logger.info("MCP tools loaded", total=len(all_tools))
+    return all_tools
