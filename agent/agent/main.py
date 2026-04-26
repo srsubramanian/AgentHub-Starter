@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 from ag_ui.core import (
     BaseEvent,
+    CustomEvent,
     EventType,
     RunAgentInput,
     RunFinishedEvent,
@@ -18,10 +19,10 @@ from ag_ui.core import (
 )
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_core.messages import AIMessageChunk, HumanMessage
+from langchain_core.messages import HumanMessage
 from starlette.responses import StreamingResponse
 
-from agent.bedrock import get_chat_model
+from agent.graph import graph
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -44,18 +45,28 @@ def _sse(event: BaseEvent) -> str:
     return f"data: {event.model_dump_json(by_alias=True, exclude_none=True)}\n\n"
 
 
+def _extract_text_delta(content: Any) -> str:
+    """Extract text from a LangChain message content (str or list of blocks)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict)
+        )
+    return ""
+
+
 async def stream_agent_response(
     agent_input: RunAgentInput,
 ) -> AsyncGenerator[str, None]:
-    """Stream AG-UI events from a Bedrock model call."""
+    """Stream AG-UI events from a LangGraph run."""
     thread_id = agent_input.thread_id
     run_id = agent_input.run_id
-    message_id = str(uuid.uuid4())
 
-    # Extract the last user message from the conversation
-    user_messages = [
-        m for m in agent_input.messages if m.role == "user"
-    ]
+    # Extract the last user message
+    user_messages = [m for m in agent_input.messages if m.role == "user"]
     if not user_messages:
         return
 
@@ -69,7 +80,7 @@ async def stream_agent_response(
         user_message=content[:100],
     )
 
-    # 1. Emit RUN_STARTED
+    # Emit RUN_STARTED
     yield _sse(
         RunStartedEvent(
             type=EventType.RUN_STARTED,
@@ -78,62 +89,77 @@ async def stream_agent_response(
         )
     )
 
-    # 2. Emit TEXT_MESSAGE_START
-    yield _sse(
-        TextMessageStartEvent(
-            type=EventType.TEXT_MESSAGE_START,
-            message_id=message_id,
-            role="assistant",
-        )
-    )
+    # LangGraph config with thread_id for checkpointing
+    config = {"configurable": {"thread_id": thread_id}}
 
-    # 3. Stream from Bedrock via langchain-aws
-    model = get_chat_model()
-    lc_messages = [HumanMessage(content=content)]
+    # Track message state for AG-UI text events
+    current_message_id: str | None = None
 
     try:
-        async for chunk in model.astream(lc_messages):
-            if not isinstance(chunk, AIMessageChunk) or not chunk.content:
-                continue
-            # Bedrock Converse returns content as str or list of content blocks
-            if isinstance(chunk.content, str):
-                text = chunk.content
-            elif isinstance(chunk.content, list):
-                text = "".join(
-                    block.get("text", "")
-                    for block in chunk.content
-                    if isinstance(block, dict)
-                )
-            else:
-                continue
-            if text:
+        async for mode, event in graph.astream(  # type: ignore[call-overload]
+            {"messages": [HumanMessage(content=content)]},
+            config=config,
+            stream_mode=["messages", "custom"],
+        ):
+            if mode == "messages":
+                # LLM token streaming — event is (AIMessageChunk, metadata)
+                chunk, metadata = event
+                # Only emit for the "respond" node's LLM calls
+                if metadata.get("langgraph_node") != "respond":
+                    continue
+                # Skip tool call chunks (they have no text content)
+                if hasattr(chunk, "tool_call_chunks") and chunk.tool_call_chunks:
+                    continue
+
+                text = _extract_text_delta(chunk.content)
+                if not text:
+                    continue
+
+                # Start a new message if needed
+                if current_message_id is None:
+                    current_message_id = str(uuid.uuid4())
+                    yield _sse(
+                        TextMessageStartEvent(
+                            type=EventType.TEXT_MESSAGE_START,
+                            message_id=current_message_id,
+                            role="assistant",
+                        )
+                    )
+
                 yield _sse(
                     TextMessageContentEvent(
                         type=EventType.TEXT_MESSAGE_CONTENT,
-                        message_id=message_id,
+                        message_id=current_message_id,
                         delta=text,
                     )
                 )
+
+            elif mode == "custom":
+                # Custom events from widget tools
+                if isinstance(event, CustomEvent):
+                    yield _sse(event)
+
     except Exception:
-        logger.exception("Error streaming from Bedrock")
+        logger.exception("Error during LangGraph run")
         raise
+    finally:
+        # Close any open text message
+        if current_message_id is not None:
+            yield _sse(
+                TextMessageEndEvent(
+                    type=EventType.TEXT_MESSAGE_END,
+                    message_id=current_message_id,
+                )
+            )
 
-    # 4. Emit TEXT_MESSAGE_END
-    yield _sse(
-        TextMessageEndEvent(
-            type=EventType.TEXT_MESSAGE_END,
-            message_id=message_id,
+        # Emit RUN_FINISHED
+        yield _sse(
+            RunFinishedEvent(
+                type=EventType.RUN_FINISHED,
+                thread_id=thread_id,
+                run_id=run_id,
+            )
         )
-    )
-
-    # 5. Emit RUN_FINISHED
-    yield _sse(
-        RunFinishedEvent(
-            type=EventType.RUN_FINISHED,
-            thread_id=thread_id,
-            run_id=run_id,
-        )
-    )
 
 
 @app.post("/agent/run")
