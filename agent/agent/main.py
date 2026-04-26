@@ -26,6 +26,7 @@ from starlette.responses import StreamingResponse
 from agent.graph import graph, set_mcp_tools
 from agent.logging_config import setup_logging
 from agent.mcp_client import load_mcp_tools
+from agent.skills_loader import load_skills
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -36,10 +37,15 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Load MCP tools at startup, register them with the graph."""
+    """Load skills + MCP tools at startup, register them with the graph."""
+    skills = load_skills()
     mcp_tools = await load_mcp_tools()
     set_mcp_tools(mcp_tools)
-    logger.info("Agent ready", mcp_tool_count=len(mcp_tools))
+    logger.info(
+        "Agent ready",
+        skill_count=len(skills),
+        mcp_tool_count=len(mcp_tools),
+    )
     yield
 
 

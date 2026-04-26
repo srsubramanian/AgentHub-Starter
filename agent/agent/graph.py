@@ -18,7 +18,9 @@ from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
 from agent.bedrock import get_chat_model
+from agent.skills_loader import skills_summary
 from agent.tools.aws_tools import AWS_TOOLS
+from agent.tools.skills_tools import SKILLS_TOOLS
 from agent.tools.widget_tools import WIDGET_TOOLS
 
 if TYPE_CHECKING:
@@ -28,7 +30,7 @@ if TYPE_CHECKING:
 # Tool registry
 # ---------------------------------------------------------------------------
 
-NATIVE_TOOLS: list[BaseTool] = [*WIDGET_TOOLS, *AWS_TOOLS]
+NATIVE_TOOLS: list[BaseTool] = [*WIDGET_TOOLS, *AWS_TOOLS, *SKILLS_TOOLS]
 _mcp_tools: list[BaseTool] = []
 
 
@@ -85,7 +87,8 @@ async def respond(state: AgentState) -> AgentState:
     if not messages or messages[0].type != "system":
         from langchain_core.messages import SystemMessage
 
-        messages = [SystemMessage(content=SYSTEM_PROMPT), *messages]
+        prompt = SYSTEM_PROMPT + skills_summary()
+        messages = [SystemMessage(content=prompt), *messages]
 
     response = await model.ainvoke(messages)
     return {"messages": [response]}
