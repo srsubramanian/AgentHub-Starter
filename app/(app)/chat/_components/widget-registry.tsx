@@ -1,8 +1,11 @@
 "use client";
 
 import type { Widget } from "@/lib/widgets";
+import { ConfirmationWidget } from "./widgets/confirmation-widget";
+import { LogTailWidget } from "./widgets/log-tail-widget";
 import { ResultsTableWidget } from "./widgets/results-table-widget";
 import { SummaryCardWidget } from "./widgets/summary-card-widget";
+import { TimeseriesChartWidget } from "./widgets/timeseries-chart-widget";
 
 interface WidgetRendererProps {
   widget: Widget;
@@ -10,7 +13,6 @@ interface WidgetRendererProps {
 
 /**
  * Maps widget types to their React components.
- * New widget types are added here as they're built.
  */
 export function WidgetRenderer({ widget }: WidgetRendererProps) {
   switch (widget.type) {
@@ -18,14 +20,16 @@ export function WidgetRenderer({ widget }: WidgetRendererProps) {
       return <SummaryCardWidget widget={widget} />;
     case "results_table":
       return <ResultsTableWidget widget={widget} />;
-    case "query_plan":
     case "timeseries_chart":
+      return <TimeseriesChartWidget widget={widget} />;
     case "log_tail":
+      return <LogTailWidget widget={widget} />;
     case "confirmation":
-      // Placeholder for Phase 3-4 widgets
+      return <ConfirmationWidget widget={widget} />;
+    case "query_plan":
       return (
         <div className="rounded-lg border bg-muted/50 p-4 text-sm text-muted-foreground">
-          Widget type &quot;{widget.type}&quot; — coming soon
+          Widget type &quot;query_plan&quot; — coming soon
         </div>
       );
     default:
