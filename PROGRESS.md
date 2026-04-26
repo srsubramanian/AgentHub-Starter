@@ -79,15 +79,31 @@
 
 ---
 
-## Phase 3 — HITL via query_plan widget + CloudWatch query execution
+## Phase 3 — AWS discovery tools + results_table widget
 
-**Status:** Not started
+**Status:** Complete (adapted from original CloudWatch plan)
+
+**Deliverables:**
+
+- [x] AWS discovery tools: list_lambda_functions, list_log_groups, list_ec2_instances, get_aws_account_summary
+- [x] Tools emit widget_create (results_table in "running") then widget_update (JSON Patch with results)
+- [x] Graceful error handling: AccessDenied shows in widget + agent explains permissions needed
+- [x] ResultsTableWidget with columns, rows, loading skeleton, error state
+- [x] Agent reducer applies JSON Patch via fast-json-patch
 
 ---
 
 ## Phase 4 — Remaining widgets + generative UI dispatching
 
-**Status:** Not started
+**Status:** Complete
+
+**Deliverables:**
+
+- [x] TimeseriesChartWidget — recharts LineChart, multi-series, themed colors, responsive
+- [x] LogTailWidget — monospace, severity badges (debug/info/warn/error), auto-scroll
+- [x] ConfirmationWidget — confirm/reject buttons, status-driven UI
+- [x] Backend tools: create_timeseries_chart, create_log_tail, create_confirmation
+- [x] Widget registry updated for all 6 types (5 implemented, query_plan placeholder)
 
 ---
 
@@ -99,7 +115,16 @@
 
 ## Phase 6 — Observability + polish
 
-**Status:** Not started
+**Status:** Complete
+
+**Deliverables:**
+
+- [x] Markdown rendering in chat bubbles (react-markdown + remark-gfm + @tailwindcss/typography)
+- [x] Error boundaries around every widget
+- [x] Health status page at /admin/health
+- [x] Header nav with Chat and Health links
+- [x] Structured logging with structlog
+- [x] Anti-aliased text, smooth scrolling
 
 ---
 
