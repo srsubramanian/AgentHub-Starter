@@ -28,7 +28,27 @@
 
 ## Phase 1 — Frontend skeleton + Bedrock hello-world agent
 
-**Status:** Not started
+**Status:** Complete
+
+**Deliverables:**
+
+- [x] Tailwind v4 + shadcn/ui initialized (New York style, Slate base, Geist font)
+- [x] 21 shadcn components seeded (button, card, textarea, scroll-area, avatar, separator, dialog, tabs, badge, dropdown-menu, tooltip, alert, skeleton, sheet, resizable, select, popover, calendar, collapsible, table, input, label)
+- [x] Runtime deps installed (@ag-ui/client, react-markdown, lucide-react, recharts, etc.)
+- [x] FastAPI agent with `POST /agent/run` endpoint streaming AG-UI events via SSE
+- [x] `ChatBedrockConverse` client in `agent/agent/bedrock.py`
+- [x] SSE proxy route handler at `app/api/agent/run/route.ts`
+- [x] Chat page at `/chat` with message list, composer, auto-scroll
+- [x] `useAgent` hook in `lib/use-agent.ts` wrapping `@ag-ui/client` HttpAgent
+- [x] App layout with header at `app/(app)/layout.tsx`
+- [x] ESLint flat config with ignores for `.next/`, `agent/`, `next-env.d.ts`
+
+**Decisions / notes:**
+
+- Used `starlette.responses.StreamingResponse` instead of `sse-starlette`'s `EventSourceResponse` to avoid double SSE framing (the AG-UI `EventEncoder` already adds `data:` prefix)
+- Wrote our own `_sse()` helper that matches AG-UI's format: `data: {camelCase JSON}\n\n`
+- Bedrock streaming requires AWS credentials in env — without them, the run completes but no content events are emitted
+- `@ag-ui/client` subscriber callback is `onTextMessageContentEvent` (not `onTextMessageContent`)
 
 ---
 
