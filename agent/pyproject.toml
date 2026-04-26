@@ -1,0 +1,60 @@
+[project]
+name = "agui-starter-agent"
+version = "0.1.0"
+description = "AgentHub Starter — LangGraph + Bedrock agent with AG-UI protocol"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "langgraph>=0.4.0",
+    "langchain-aws>=0.2.0",
+    "boto3>=1.37.0",
+    "ag-ui-protocol>=0.1.0",
+    "pydantic>=2.11.0",
+    "structlog>=25.1.0",
+    "python-jose[cryptography]>=3.4.0",
+    "jsonpatch>=1.33",
+    "python-ulid>=3.0.0",
+    "sse-starlette>=2.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.0",
+    "mypy>=1.15.0",
+    "pytest>=8.3.0",
+    "boto3-stubs[logs,sts]>=1.37.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM", "TCH"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "langgraph.*",
+    "langchain_aws.*",
+    "ag_ui_protocol.*",
+    "sse_starlette.*",
+    "jose.*",
+    "jsonpatch.*",
+    "ulid.*",
+]
+ignore_missing_imports = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
