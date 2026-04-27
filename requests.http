@@ -1,0 +1,192 @@
+### AgentHub Starter — local API requests
+#
+# Use with the VS Code "REST Client" extension (humao.rest-client) or
+# VS Code's built-in .http support. Click "Send Request" above each
+# block, or use `Ctrl+Alt+R` / `Cmd+Alt+R`.
+#
+# Two base URLs:
+#   - @agent = direct to FastAPI (port 8000)  — fastest, no Next.js layer
+#   - @web   = via Next.js proxy (port 3000)  — same path the browser uses
+#
+# Most agent endpoints are also reachable via the web proxy under the
+# same path (`/api/agent/run`, `/api/tasks/...`).
+
+@agent = http://localhost:8000
+@web   = http://localhost:3000
+
+# A stable thread-id lets you replay /agent/run and keep conversation
+# state in the in-memory checkpointer. Change it to start fresh.
+@threadId = thread-dev-1
+@runId    = run-{{$timestamp}}
+
+###############################################################################
+# Health
+###############################################################################
+
+### Agent health
+GET {{agent}}/health
+
+###############################################################################
+# Agent — AG-UI streaming endpoint
+#
+# This is an SSE stream. REST Client will show events as they arrive.
+# The body is an AG-UI RunAgentInput. The agent uses the LAST user
+# message in `messages` as the prompt.
+###############################################################################
+
+### Agent run — simple text question (direct to agent)
+POST {{agent}}/agent/run
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "thread_id": "{{threadId}}",
+  "run_id": "{{runId}}",
+  "messages": [
+    { "id": "msg-1", "role": "user", "content": "Hello in one short sentence." }
+  ],
+  "tools": [],
+  "context": [],
+  "state": {},
+  "forwarded_props": {}
+}
+
+### Agent run — AWS account summary (exercises a native tool + summary card widget)
+POST {{agent}}/agent/run
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "thread_id": "{{threadId}}",
+  "run_id": "run-aws-{{$timestamp}}",
+  "messages": [
+    { "id": "msg-1", "role": "user", "content": "What is my AWS account info? Be brief." }
+  ],
+  "tools": [],
+  "context": [],
+  "state": {},
+  "forwarded_props": {}
+}
+
+### Agent run — list lambda functions (results_table widget)
+POST {{agent}}/agent/run
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "thread_id": "{{threadId}}",
+  "run_id": "run-lambda-{{$timestamp}}",
+  "messages": [
+    { "id": "msg-1", "role": "user", "content": "List my Lambda functions." }
+  ],
+  "tools": [],
+  "context": [],
+  "state": {},
+  "forwarded_props": {}
+}
+
+### Agent run — trigger a skill (cloudwatch-query-builder)
+POST {{agent}}/agent/run
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "thread_id": "{{threadId}}",
+  "run_id": "run-skill-{{$timestamp}}",
+  "messages": [
+    { "id": "msg-1", "role": "user", "content": "Help me find errors in CloudWatch logs from the last hour." }
+  ],
+  "tools": [],
+  "context": [],
+  "state": {},
+  "forwarded_props": {}
+}
+
+### Agent run — same flow, but through the Next.js proxy (browser path)
+POST {{web}}/api/agent/run
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "thread_id": "{{threadId}}",
+  "run_id": "run-proxy-{{$timestamp}}",
+  "messages": [
+    { "id": "msg-1", "role": "user", "content": "Hello via Next.js proxy." }
+  ],
+  "tools": [],
+  "context": [],
+  "state": {},
+  "forwarded_props": {}
+}
+
+###############################################################################
+# Scheduled tasks
+###############################################################################
+
+### List schedule presets
+GET {{agent}}/tasks/presets
+
+### List all tasks
+GET {{agent}}/tasks
+
+### Create a task
+# @name createTask
+POST {{agent}}/tasks
+Content-Type: application/json
+
+{
+  "name": "Hourly account check",
+  "prompt": "What is my AWS account info? Be brief.",
+  "cron": "0 * * * *"
+}
+
+### Capture the created task id (used by the requests below)
+@taskId = {{createTask.response.body.id}}
+
+### Get a single task
+GET {{agent}}/tasks/{{taskId}}
+
+### Update a task (rename + change to every 15 minutes)
+PATCH {{agent}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{
+  "name": "Quarter-hourly account check",
+  "cron": "*/15 * * * *"
+}
+
+### Disable a task without deleting it
+PATCH {{agent}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{ "enabled": false }
+
+### Manually run a task now (synchronous — blocks until agent finishes)
+POST {{agent}}/tasks/{{taskId}}/run
+
+### List runs for a task (newest first)
+GET {{agent}}/tasks/{{taskId}}/runs?limit=20
+
+### Delete a task (also clears its run history)
+DELETE {{agent}}/tasks/{{taskId}}
+
+###############################################################################
+# Same task endpoints via the Next.js proxy
+# (useful for verifying the browser path end-to-end)
+###############################################################################
+
+### Tasks via web proxy
+GET {{web}}/api/tasks
+
+### Presets via web proxy
+GET {{web}}/api/tasks/presets
+
+### Create via web proxy
+POST {{web}}/api/tasks
+Content-Type: application/json
+
+{
+  "name": "Daily 9am EST AWS summary",
+  "prompt": "Give me a one-line AWS account status.",
+  "cron": "0 9 * * *"
+}
