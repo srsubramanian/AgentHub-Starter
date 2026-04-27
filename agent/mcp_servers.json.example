@@ -17,7 +17,7 @@
     }
   },
 
-  "_comment_remote": "External HTTP MCP server example. The mcp-http service in docker-compose.yml runs mcp_http_server.py and is reachable at http://mcp-http:8765/mcp from the agent container.",
+  "_comment_remote": "External HTTP MCP server example. The mcp-http service in docker-compose.yml runs mcp_http_server.py and is reachable at http://mcp-http:8765/mcp from the agent container. LOCAL ONLY — omit this entry when deploying to ECS (the mcp-http service isn't part of the ECS task; see infra/ecs/README.md).",
   "remote": {
     "url": "http://mcp-http:8765/mcp",
     "transport": "streamable_http"

@@ -1,0 +1,92 @@
+{
+  "family": "agenthub-starter",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/agenthub-starter-execution-role",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/agenthub-starter-task-role",
+  "containerDefinitions": [
+    {
+      "name": "agent",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/agenthub-agent:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp",
+          "name": "agent-http"
+        }
+      ],
+      "environment": [
+        { "name": "AGENT_PORT", "value": "8000" },
+        { "name": "AWS_REGION", "value": "us-east-1" },
+        { "name": "BEDROCK_AGENT_MODEL", "value": "us.anthropic.claude-sonnet-4-5-20250929-v1:0" },
+        { "name": "BEDROCK_CLASSIFIER_MODEL", "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
+        { "name": "MCP_SERVERS_CONFIG", "value": "mcp_servers.json" }
+      ],
+      "secrets": [
+        {
+          "name": "GITHUB_TOKEN",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:agenthub-starter/github-token-XXXXXX"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "python -c \"import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)\""
+        ],
+        "interval": 10,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/agenthub-starter",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "agent",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+    {
+      "name": "web",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/agenthub-web:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "protocol": "tcp",
+          "name": "web-http"
+        }
+      ],
+      "environment": [
+        { "name": "AGENT_URL", "value": "http://localhost:8000" },
+        { "name": "NEXT_TELEMETRY_DISABLED", "value": "1" },
+        { "name": "PORT", "value": "3000" },
+        { "name": "HOSTNAME", "value": "0.0.0.0" }
+      ],
+      "dependsOn": [
+        {
+          "containerName": "agent",
+          "condition": "HEALTHY"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/agenthub-starter",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "web",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

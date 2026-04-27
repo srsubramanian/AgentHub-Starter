@@ -1,0 +1,52 @@
+# Local mirror of the single-task ECS Fargate layout.
+#
+# Runs the web container in the agent container's network namespace
+# (network_mode: "service:agent"), so both see each other on
+# `localhost` — exactly like two containers in one Fargate task.
+#
+# Use this to rehearse the production topology before pushing to ECS:
+#
+#   docker compose -f docker-compose.ecs-local.yml up --build
+#   open http://localhost:3000/chat
+#
+# Differences vs docker-compose.yml:
+#   - web is built from the production `runner` stage (next start, not next dev)
+#   - AGENT_URL is http://localhost:8000 (loopback, not Docker DNS)
+#   - mcp-http demo is dropped (matches the ECS deployment)
+#   - Port mappings live on the agent container, since it owns the namespace.
+
+services:
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    # Both the web (3000) and agent (8000) ports are published here
+    # because the web container, which joins this namespace, can't
+    # publish its own ports.
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    volumes:
+      - ~/.aws:/root/.aws:ro
+      - ./agent/mcp_servers.json:/app/mcp_servers.json:ro
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    network_mode: "service:agent"
+    environment:
+      - AGENT_URL=http://localhost:8000
+      - NEXT_TELEMETRY_DISABLED=1
+    depends_on:
+      agent:
+        condition: service_healthy
