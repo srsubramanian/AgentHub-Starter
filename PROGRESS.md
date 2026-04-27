@@ -131,3 +131,79 @@
 ## Phase 7 — Postgres checkpointer
 
 **Status:** Not started (deferred)
+
+---
+
+## Beyond the original plan
+
+Capabilities added on top of Phase 6 (these aren't in the original PLAN.md
+but ship in the repo today):
+
+### MCP (Model Context Protocol) integration
+
+**Status:** Complete
+
+- [x] `langchain-mcp-adapters` wired into `agent/agent/mcp_client.py`
+- [x] `mcp_servers.json` config (gitignored; `.example` in repo) supports
+      stdio, `streamable_http`, `sse`, and `websocket` transports
+- [x] Env var substitution (`${VAR}`) in config — secrets stay in `.env`
+- [x] Independent server loading — one bad server doesn't break others
+- [x] Tool name prefixing (`<server>_<tool>`) avoids collisions
+- [x] Servers shipped:
+    - `aws_docs` — Real AWS Labs documentation MCP server (stdio via `uvx`)
+    - `remote` — In-repo FastMCP HTTP demo at `mcp_http_server.py` running
+      as a separate `mcp-http` Docker service
+    - `github` — GitHub MCP server with `${GITHUB_TOKEN}` placeholder
+    - `demo` (in `.example`) — In-repo `mcp_demo_server.py` for testing
+- [x] Docker copies `mcp_demo_server.py` + `mcp_http_server.py` into the
+      container; `uv` AND `uvx` binaries copied (was previously just `uv`)
+- [x] `agent/Dockerfile` and `docker-compose.yml` mount `mcp_servers.json`
+      as a volume so config edits don't require a rebuild
+
+### Anthropic-style Skills
+
+**Status:** Complete
+
+- [x] `agent/agent/skills_loader.py` — loads `agent/skills/<name>/SKILL.md`
+      files at startup, parses YAML frontmatter
+- [x] `agent/agent/tools/skills_tools.py::invoke_skill(name)` — LLM tool
+      to load full skill body into context
+- [x] `skills_summary()` injected into the system prompt at request time
+      (so newly-loaded skills appear without a restart of the system
+      prompt template)
+- [x] Three skills shipped:
+    - `cloudwatch-query-builder` — CloudWatch Logs Insights query patterns
+    - `aws-cost-analysis` — cost driver / savings recommendations
+    - `incident-response` — production triage runbook
+
+### Markdown rendering with syntax highlighting
+
+**Status:** Complete
+
+- [x] Replaced raw `react-markdown` rendering with `rehype-highlight` +
+      `highlight.js` (theme: `github-dark`)
+- [x] Custom `prose-code` / `prose-pre` Tailwind overrides give
+      guaranteed contrast in both bubble colors
+
+### Documentation
+
+**Status:** Complete
+
+- [x] `docs/` folder with 13 markdown files covering everything:
+      getting-started, architecture, backend, frontend, widgets,
+      tools, mcp-servers, skills, configuration, development,
+      deployment, troubleshooting (~2,400 lines total)
+- [x] 11 Mermaid diagrams (request flow, state graph, lifecycle,
+      tool merging, MCP loading, etc.) — render natively on GitHub
+- [x] Sequential nav footer on every doc (← Back · ← Previous · Next →)
+- [x] Inline cross-references with relative file links
+- [x] Root `README.md` and `CLAUDE.md` point at `docs/` as the canonical
+      reference
+
+### Operational fixes (from real testing)
+
+- [x] Bedrock content blocks: `_extract_text_delta` handles both string
+      and list-of-blocks shapes (Claude 4.5 returns list)
+- [x] structlog: removed `add_logger_name` (incompatible with
+      `PrintLogger`, was crashing on every log call in Docker)
+- [x] AWS access denied → graceful widget error with explanation

@@ -12,6 +12,29 @@ Detailed documentation lives in [`docs/`](./docs/README.md). Read those before m
 
 Single project, not a monorepo. Next.js app at the root, Python agent in `agent/`. No workspaces.
 
+## Current state
+
+`PROGRESS.md` has the full breakdown. Quick reference:
+
+| Phase / Capability | Status |
+|---|---|
+| Phase 0 — Repo skeleton | Done |
+| Phase 1 — Frontend skeleton + Bedrock streaming | Done |
+| Phase 2 — LangGraph agent + canvas + first widget | Done |
+| Phase 3 — AWS discovery tools + results_table (adapted from CloudWatch HITL plan) | Done |
+| Phase 4 — Remaining widgets (timeseries, log_tail, confirmation) | Done (5/6 widget types implemented; `query_plan` is a placeholder) |
+| Phase 5 — Auth, tenant scoping | **Not started** |
+| Phase 6 — Observability + polish | Done |
+| Phase 7 — Postgres checkpointer | **Not started** (deferred) |
+| MCP integration (stdio + HTTP, env-var substitution, 4 servers configured) | Done — beyond plan |
+| Anthropic-style Skills (3 SKILL.md files shipped) | Done — beyond plan |
+| Markdown rendering with syntax highlighting | Done — beyond plan |
+| `docs/` folder with 13 files + 11 Mermaid diagrams | Done — beyond plan |
+
+When starting Phase 5 or 7, read `PLAN.md` for the original spec and check
+`PROGRESS.md` for what changed in adapted phases (Phase 3 in particular
+diverged from the original CloudWatch-HITL plan).
+
 ## Critical conventions
 
 - **Widget schema source of truth is `agent/agent/widgets.py`.** TypeScript types in `lib/widgets.ts` mirror it by hand. If you change one, change the other in the same commit.
