@@ -18,10 +18,11 @@ you're new:
 | 6 | [Tools](./tools.md) | How the LLM calls AWS, widgets, MCP, skills |
 | 7 | [MCP Servers](./mcp-servers.md) | Adding stdio and HTTP MCP servers |
 | 8 | [Skills](./skills.md) | Anthropic-style skills (SKILL.md files) |
-| 9 | [Configuration](./configuration.md) | Environment variables, config files |
-| 10 | [Development](./development.md) | Workflow, lint, typecheck, debugging |
-| 11 | [Deployment](./deployment.md) | Docker setup, what's missing for production |
-| 12 | [Troubleshooting](./troubleshooting.md) | Common issues and fixes |
+| 9 | [Scheduled Tasks](./scheduled-tasks.md) | Cron-driven recurring agent runs |
+| 10 | [Configuration](./configuration.md) | Environment variables, config files |
+| 11 | [Development](./development.md) | Workflow, lint, typecheck, debugging |
+| 12 | [Deployment](./deployment.md) | Docker setup, what's missing for production |
+| 13 | [Troubleshooting](./troubleshooting.md) | Common issues and fixes |
 
 ## TL;DR — what is this?
 

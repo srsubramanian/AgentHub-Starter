@@ -18,15 +18,32 @@ from ag_ui.core import (
     TextMessageEndEvent,
     TextMessageStartEvent,
 )
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage
 from starlette.responses import StreamingResponse
+from ulid import ULID
 
 from agent.graph import graph, set_mcp_tools
 from agent.logging_config import setup_logging
 from agent.mcp_client import load_mcp_tools
 from agent.skills_loader import load_skills
+from agent.tasks import store as tasks_store
+from agent.tasks.models import (
+    SCHEDULE_PRESETS,
+    CreateTaskRequest,
+    ScheduledTask,
+    TaskRun,
+    UpdateTaskRequest,
+)
+from agent.tasks.runner import (
+    execute_task,
+    next_run_for,
+    schedule_task,
+    shutdown_scheduler,
+    start_scheduler,
+    unschedule_task,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -41,12 +58,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     skills = load_skills()
     mcp_tools = await load_mcp_tools()
     set_mcp_tools(mcp_tools)
+    start_scheduler()
+    # Re-register any tasks that exist (will be empty in-memory, but keeps the
+    # API consistent for when we swap to a persistent store).
+    for task in tasks_store.list_tasks():
+        try:
+            schedule_task(task)
+        except Exception:
+            logger.exception("Failed to re-schedule task", task_id=task.id)
     logger.info(
         "Agent ready",
         skill_count=len(skills),
         mcp_tool_count=len(mcp_tools),
     )
-    yield
+    try:
+        yield
+    finally:
+        shutdown_scheduler()
 
 
 app = FastAPI(title="AgentHub Starter Agent", lifespan=lifespan)
@@ -196,3 +224,99 @@ async def agent_run(agent_input: RunAgentInput) -> StreamingResponse:
 async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Scheduled tasks API
+# ---------------------------------------------------------------------------
+
+
+def _decorate(task: ScheduledTask) -> dict[str, Any]:
+    """Return the task with computed next_run_at attached."""
+    return {**task.model_dump(), "next_run_at": next_run_for(task)}
+
+
+@app.get("/tasks/presets")
+async def list_schedule_presets() -> list[dict[str, str]]:
+    """Return human-friendly cron presets for the create form."""
+    return SCHEDULE_PRESETS
+
+
+@app.get("/tasks")
+async def list_tasks() -> list[dict[str, Any]]:
+    """List all scheduled tasks with computed next-run times."""
+    return [_decorate(t) for t in tasks_store.list_tasks()]
+
+
+@app.post("/tasks", status_code=201)
+async def create_task(body: CreateTaskRequest) -> dict[str, Any]:
+    task = ScheduledTask(
+        id=str(ULID()),
+        name=body.name,
+        prompt=body.prompt,
+        cron=body.cron,
+        timezone=body.timezone,
+        enabled=body.enabled,
+    )
+    tasks_store.upsert_task(task)
+    try:
+        schedule_task(task)
+    except Exception as e:
+        # Roll back if the cron is invalid
+        tasks_store.delete_task(task.id)
+        raise HTTPException(status_code=400, detail=f"Invalid cron expression: {e}") from e
+    return _decorate(task)
+
+
+@app.get("/tasks/{task_id}")
+async def get_task(task_id: str) -> dict[str, Any]:
+    task = tasks_store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return _decorate(task)
+
+
+@app.patch("/tasks/{task_id}")
+async def update_task(task_id: str, body: UpdateTaskRequest) -> dict[str, Any]:
+    task = tasks_store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if body.name is not None:
+        task.name = body.name
+    if body.prompt is not None:
+        task.prompt = body.prompt
+    if body.cron is not None:
+        task.cron = body.cron
+    if body.enabled is not None:
+        task.enabled = body.enabled
+
+    tasks_store.upsert_task(task)
+    try:
+        schedule_task(task)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid cron expression: {e}") from e
+    return _decorate(task)
+
+
+@app.delete("/tasks/{task_id}", status_code=204)
+async def delete_task(task_id: str) -> None:
+    if not tasks_store.get_task(task_id):
+        raise HTTPException(status_code=404, detail="Task not found")
+    unschedule_task(task_id)
+    tasks_store.delete_task(task_id)
+
+
+@app.post("/tasks/{task_id}/run")
+async def run_task_now(task_id: str) -> TaskRun:
+    """Manually trigger a task. Runs synchronously and returns the TaskRun."""
+    if not tasks_store.get_task(task_id):
+        raise HTTPException(status_code=404, detail="Task not found")
+    return await execute_task(task_id, trigger="manual")
+
+
+@app.get("/tasks/{task_id}/runs")
+async def list_task_runs(task_id: str, limit: int = 50) -> list[TaskRun]:
+    if not tasks_store.get_task(task_id):
+        raise HTTPException(status_code=404, detail="Task not found")
+    return tasks_store.list_runs_for_task(task_id, limit=limit)

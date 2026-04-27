@@ -15,6 +15,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             Chat
           </Link>
           <Link
+            href="/tasks"
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Tasks
+          </Link>
+          <Link
             href="/admin/health"
             className="text-xs text-muted-foreground hover:text-foreground"
           >

@@ -235,4 +235,4 @@ capabilities; skills give it institutional knowledge.
 
 ---
 
-[← Back to docs index](./README.md) · [← Previous: MCP Servers](./mcp-servers.md) · [Next: Configuration →](./configuration.md)
+[← Back to docs index](./README.md) · [← Previous: MCP Servers](./mcp-servers.md) · [Next: Scheduled Tasks →](./scheduled-tasks.md)

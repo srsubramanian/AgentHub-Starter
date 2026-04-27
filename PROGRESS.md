@@ -200,6 +200,29 @@ but ship in the repo today):
 - [x] Root `README.md` and `CLAUDE.md` point at `docs/` as the canonical
       reference
 
+### Scheduled tasks
+
+**Status:** Complete
+
+- [x] `apscheduler` dependency, `AsyncIOScheduler` started in FastAPI
+      lifespan
+- [x] `agent/agent/tasks/` package: models (Pydantic), store
+      (in-memory dict), runner (APScheduler + execute_task)
+- [x] REST API: `POST/GET/PATCH/DELETE /tasks`,
+      `POST /tasks/{id}/run`, `GET /tasks/{id}/runs`,
+      `GET /tasks/presets`
+- [x] Cron expressions interpreted in `America/New_York` (EST/EDT,
+      DST handled automatically); presets shipped (every 5/15 min,
+      hourly, every 6h, daily 9am, weekdays 9am, Mondays 9am)
+- [x] Each scheduled run uses a fresh `thread_id` so it doesn't share
+      conversation state with the chat
+- [x] Frontend `/tasks` page: list with last-run / next-run / actions,
+      "New task" dialog with preset dropdown + custom cron input
+- [x] Frontend `/tasks/{id}` detail page: prompt + run history with
+      collapsible markdown-rendered responses (same renderer as chat)
+- [x] Catch-all proxy at `app/api/tasks/[[...path]]/route.ts`
+- [x] Header nav link added
+
 ### Operational fixes (from real testing)
 
 - [x] Bedrock content blocks: `_extract_text_delta` handles both string

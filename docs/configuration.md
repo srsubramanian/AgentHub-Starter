@@ -137,4 +137,4 @@ reachable when the agent loads its tool list).
 
 ---
 
-[← Back to docs index](./README.md) · [← Previous: Skills](./skills.md) · [Next: Development →](./development.md)
+[← Back to docs index](./README.md) · [← Previous: Scheduled Tasks](./scheduled-tasks.md) · [Next: Development →](./development.md)

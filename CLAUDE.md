@@ -29,7 +29,8 @@ Single project, not a monorepo. Next.js app at the root, Python agent in `agent/
 | MCP integration (stdio + HTTP, env-var substitution, 4 servers configured) | Done — beyond plan |
 | Anthropic-style Skills (3 SKILL.md files shipped) | Done — beyond plan |
 | Markdown rendering with syntax highlighting | Done — beyond plan |
-| `docs/` folder with 13 files + 11 Mermaid diagrams | Done — beyond plan |
+| Scheduled tasks (cron-driven recurring agent runs, EST timezone, run history) | Done — beyond plan |
+| `docs/` folder (14 files, 11+ Mermaid diagrams) | Done — beyond plan |
 
 When starting Phase 5 or 7, read `PLAN.md` for the original spec and check
 `PROGRESS.md` for what changed in adapted phases (Phase 3 in particular
@@ -47,6 +48,7 @@ diverged from the original CloudWatch-HITL plan).
 - **Tools merge at request time.** `NATIVE_TOOLS` (widget + AWS + skills) plus `_mcp_tools` (loaded async at startup) are combined inside `_all_tools()` in `graph.py` — never bind a stale tool list at module load.
 - **MCP config is gitignored.** `agent/mcp_servers.json` may contain secrets; copy from `mcp_servers.json.example`. Use `${VAR}` substitution for tokens, not literals.
 - **Skills are SKILL.md files under `agent/skills/<name>/`** with YAML frontmatter (`name`, `description`). Loaded once at startup; advertised in the system prompt; full body fetched via the `invoke_skill` tool when relevant.
+- **Scheduled tasks use APScheduler `AsyncIOScheduler`** started in the FastAPI lifespan. Cron expressions are interpreted in `America/New_York` (EST/EDT). Task and run records live in `agent/agent/tasks/store.py` (in-memory, like `InMemorySaver`).
 
 ## Stack quick reference
 

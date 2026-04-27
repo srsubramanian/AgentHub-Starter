@@ -19,6 +19,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.2.2",
     "fastmcp>=3.2.4",
     "pyyaml>=6.0.3",
+    "apscheduler>=3.11.2",
 ]
 
 [dependency-groups]
@@ -48,6 +49,7 @@ disallow_untyped_defs = true
 module = [
     "langchain_aws.*",
     "jsonpatch.*",
+    "apscheduler.*",
 ]
 ignore_missing_imports = true
 
