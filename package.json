@@ -55,6 +55,7 @@
     "tapable": "2.3.2",
     "es-toolkit": "1.45.1",
     "typescript-eslint": "8.58.1",
-    "eslint-plugin-react-hooks": "7.0.1"
+    "eslint-plugin-react-hooks": "7.0.1",
+    "ajv": "6.12.6"
   }
 }
