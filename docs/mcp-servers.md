@@ -7,14 +7,31 @@ tools the agent can call.
 
 ## How it's wired
 
-1. **Config**: `agent/mcp_servers.json` — a dict of server name →
-   connection settings (gitignored; copy from `.example`)
-2. **Loader**: `agent/agent/mcp_client.py::load_mcp_tools()` runs at
-   FastAPI startup, returns a `list[BaseTool]`
-3. **Registry**: `set_mcp_tools(tools)` writes to a module-level
-   global in `graph.py`
-4. **Binding**: `_all_tools()` returns native + MCP tools at request
-   time, bound to the model
+```mermaid
+flowchart TD
+    A[FastAPI lifespan startup] --> B[load_mcp_tools]
+    B --> C[Read mcp_servers.json]
+    C --> D[Substitute ${ENV_VARS}]
+    D --> E{For each server<br/>name: config}
+    E -->|skip if name starts with _| E
+    E -->|stdio| F[spawn subprocess<br/>command + args]
+    E -->|streamable_http| G[HTTP client<br/>url + headers]
+    F --> H[get_tools]
+    G --> H
+    H -->|success| I[append to all_tools]
+    H -->|fail| J[log exception, skip]
+    I --> E
+    J --> E
+    I --> K[set_mcp_tools all_tools]
+    K --> L[Tools available to graph]
+```
+
+1. **Config**: `agent/mcp_servers.json` — a dict of server name → connection settings (gitignored; copy from `.example`)
+2. **Loader**: [`agent/agent/mcp_client.py::load_mcp_tools()`](../agent/agent/mcp_client.py) runs in the FastAPI lifespan, returns `list[BaseTool]`
+3. **Registry**: `set_mcp_tools(tools)` writes to a module-level global in [`agent/agent/graph.py`](../agent/agent/graph.py)
+4. **Binding**: `_all_tools()` returns native + MCP tools at request time, bound to the model
+
+See [tools.md](./tools.md) for how MCP tools fit alongside native tools.
 
 ## Supported transports
 
@@ -239,3 +256,7 @@ A starting list of well-known servers worth integrating:
 | Memory | Persistent agent memory | None |
 
 The full list is at <https://github.com/modelcontextprotocol/servers>.
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Tools](./tools.md) · [Next: Skills →](./skills.md)

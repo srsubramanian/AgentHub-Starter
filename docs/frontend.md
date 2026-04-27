@@ -87,6 +87,26 @@ Actions handled by `agentReducer`:
 
 ## SSE consumption
 
+```mermaid
+flowchart TD
+    A[user types] --> B[sendMessage]
+    B --> C[dispatch ADD_USER_MESSAGE]
+    B --> D[dispatch SET_STREAMING true]
+    B --> E[HttpAgent.runAgent]
+    E -- onTextMessageStartEvent --> F[dispatch START_ASSISTANT_MESSAGE]
+    E -- onTextMessageContentEvent --> G[dispatch APPEND_TEXT]
+    E -- onCustomEvent --> H{event.name}
+    H -- widget_create --> I[dispatch WIDGET_CREATE]
+    H -- widget_update --> J[dispatch WIDGET_UPDATE<br/>fast-json-patch]
+    H -- widget_remove --> K[dispatch WIDGET_REMOVE]
+    F --> Z[React re-renders]
+    G --> Z
+    I --> Z
+    J --> Z
+    K --> Z
+    E --> L[finally: dispatch SET_STREAMING false]
+```
+
 `useAgent` constructs an `HttpAgent` from `@ag-ui/client`:
 
 ```ts
@@ -176,3 +196,7 @@ npm run typecheck   # tsc --noEmit
 ```
 
 Both must pass before commit. CI runs them on PRs.
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Backend](./backend.md) · [Next: Widgets →](./widgets.md)

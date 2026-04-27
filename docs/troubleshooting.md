@@ -321,3 +321,7 @@ Traces appear in LangSmith.
 Check `docker compose logs -f agent` first — the structured logs
 usually point at the cause. Most issues are environment-related (env
 vars, AWS perms, Docker resources) rather than code bugs.
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Deployment](./deployment.md)

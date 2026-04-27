@@ -49,12 +49,38 @@ Key points:
 
 ## Tool calling flow
 
-1. LLM in the `respond` node decides to call a tool, returns an
-   `AIMessage` with `tool_calls`
+```mermaid
+sequenceDiagram
+    autonumber
+    participant L as LLM (Claude)
+    participant R as respond node
+    participant SC as should_continue
+    participant T as tools node (ToolNode)
+    participant Fn as Tool function
+    participant W as StreamWriter
+
+    R->>L: bind_tools + ainvoke
+    L-->>R: AIMessage with tool_calls
+    R->>SC: route based on tool_calls
+    SC->>T: has tool_calls → tools
+    T->>Fn: invoke tool
+    Fn->>W: writer(CustomEvent)<br/>(if widget tool)
+    Fn-->>T: result string
+    T-->>R: ToolMessage
+    R->>L: ainvoke (with tool result in context)
+    L-->>R: final AIMessage<br/>(no tool_calls)
+    R->>SC: route
+    SC->>SC: no tool_calls → END
+```
+
+1. LLM in the `respond` node decides to call a tool, returns an `AIMessage` with `tool_calls`
 2. `should_continue` routes to the `tools` node
 3. `ToolNode` invokes each tool function, gets back a `ToolMessage`
-4. Loop back to `respond` with the tool result in context
-5. LLM either calls more tools or produces a final text answer
+4. Tool functions can write `CustomEvent` objects via the `StreamWriter` (for widget creation/updates)
+5. Loop back to `respond` with the tool result in context
+6. LLM either calls more tools or produces a final text answer
+
+See [architecture.md](./architecture.md) for how this fits into the overall request flow.
 
 ## Widget tools
 
@@ -167,3 +193,7 @@ descriptions.
   and returns the error as a `ToolMessage` so the LLM can recover or
   explain. This is why `aws_tools` use try/except — to add user-visible
   context to errors.
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Widgets](./widgets.md) · [Next: MCP Servers →](./mcp-servers.md)

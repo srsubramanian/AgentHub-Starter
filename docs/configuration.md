@@ -134,3 +134,7 @@ reachable when the agent loads its tool list).
 | Frontend code | Hot-reloaded by Next.js dev server |
 | Agent Python code | Hot-reloaded by `uvicorn --reload` (when running locally) |
 | Docker `agent/Dockerfile` | Rebuild (`docker compose up --build`) |
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Skills](./skills.md) · [Next: Development →](./development.md)

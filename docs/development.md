@@ -200,3 +200,7 @@ branching strategy yet, but:
 - Keep PRs small and focused
 - Make sure CI passes
 - One commit per logical change is preferred over a single squash
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Configuration](./configuration.md) · [Next: Deployment →](./deployment.md)

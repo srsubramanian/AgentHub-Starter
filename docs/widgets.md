@@ -35,19 +35,35 @@ class BaseWidget(BaseModel):
 
 ## Lifecycle
 
-Status flow:
+```mermaid
+stateDiagram-v2
+    [*] --> draft: HITL widgets<br/>(query_plan, confirmation)
+    [*] --> running: async data widgets<br/>(results_table)
+    [*] --> complete: instant widgets<br/>(summary_card, timeseries_chart)
 
-```
-draft         → user-editable, not yet submitted
-submitted     → user approved, agent will execute
-running       → execution in progress (e.g. AWS API call)
-complete      → finished successfully
-error         → finished with an error (error_message populated)
-cancelled     → user rejected or aborted
+    draft --> submitted: user approves
+    draft --> cancelled: user rejects
+    submitted --> running: agent executes
+    running --> complete: success
+    running --> error: failure (error_message set)
+
+    complete --> [*]
+    error --> [*]
+    cancelled --> [*]
 ```
 
-Most widgets go straight to `complete`. The HITL pattern (Phase 3+ in
-`PLAN.md`) uses `draft → submitted → running → complete`.
+| Status | Meaning |
+|--------|---------|
+| `draft` | User-editable, awaiting approval (HITL widgets only) |
+| `submitted` | User approved, agent will execute |
+| `running` | Execution in progress (e.g. AWS API call) |
+| `complete` | Finished successfully |
+| `error` | Finished with an error (`error_message` populated) |
+| `cancelled` | User rejected or aborted |
+
+Most widgets created today go straight to `complete`. The HITL pattern
+(`draft → submitted → running → complete`) is used by widgets that
+require user approval before consuming resources or making changes.
 
 ## How widgets get to the browser
 
@@ -188,3 +204,7 @@ when appropriate.
 - **Widget IDs must be unique** — use ULIDs (already the convention).
 - **Don't mutate widget state from the frontend.** All updates flow
   from the agent via `widget_update` events.
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Frontend](./frontend.md) · [Next: Tools →](./tools.md)

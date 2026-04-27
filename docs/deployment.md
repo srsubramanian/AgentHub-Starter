@@ -9,25 +9,26 @@ it for real.
 
 `docker-compose.yml` defines three services that boot together:
 
-```
-┌─────────────────────────────────────────────┐
-│ web        :3000  (Next.js dev mode)        │
-│ depends_on: agent (healthy)                 │
-└─────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────┐
-│ agent      :8000  (FastAPI + LangGraph)     │
-│ mounts:    ~/.aws:/root/.aws:ro             │
-│            agent/mcp_servers.json:/app/...  │
-│ depends_on: mcp-http (started)              │
-│ healthcheck: GET /health                    │
-└─────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────┐
-│ mcp-http   :8765  (demo external MCP server)│
-└─────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    Browser[Browser<br/>localhost:3000] --> Web
+
+    subgraph compose["docker-compose"]
+        Web[web service<br/>Next.js dev :3000<br/>AGENT_URL=http://agent:8000]
+        Agent[agent service<br/>FastAPI + LangGraph :8000<br/>healthcheck: /health]
+        MCPHTTP[mcp-http service<br/>FastMCP :8765]
+
+        Web -->|SSE proxy| Agent
+        Agent -->|streamable_http| MCPHTTP
+    end
+
+    Agent -->|boto3| Bedrock[AWS Bedrock<br/>Claude Sonnet 4.5]
+    Agent -->|boto3| AWSAPI[AWS APIs<br/>Lambda / Logs / EC2 / STS]
+    Agent -->|stdio| AWSDocs[uvx aws-docs<br/>subprocess]
+
+    Agent -.reads.-> Skills[(skills/*.md)]
+    Agent -.reads.-> MCPConfig[(mcp_servers.json)]
+    Agent -.reads.-> AWSCreds[(~/.aws/credentials<br/>volume mount, ro)]
 ```
 
 ### Service: `web`
@@ -188,3 +189,7 @@ state. Both are deferred in the current build.
    alerts in AWS
 4. **Tenant isolation** — currently all conversations share the same
    AWS credentials and same Bedrock client
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Development](./development.md) · [Next: Troubleshooting →](./troubleshooting.md)

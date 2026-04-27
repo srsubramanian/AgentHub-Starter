@@ -107,3 +107,7 @@ loading at startup.
 - [Architecture](./architecture.md) — understand how the pieces fit
 - [Configuration](./configuration.md) — all env vars in one place
 - [Troubleshooting](./troubleshooting.md) — common issues
+
+---
+
+[← Back to docs index](./README.md) · [Next: Architecture →](./architecture.md)

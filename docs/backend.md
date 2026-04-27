@@ -51,8 +51,23 @@ The FastAPI app exposes:
 
 ### Lifespan
 
-`main.py` uses a FastAPI `lifespan` context manager that runs once at
-startup:
+`main.py` uses a FastAPI `lifespan` context manager that runs once at startup:
+
+```mermaid
+flowchart TD
+    A[FastAPI startup] --> B[setup_logging]
+    B --> C[load_skills]
+    C -->|reads| D["agent/skills/*/SKILL.md"]
+    D --> E[load_mcp_tools async]
+    E -->|reads| F[mcp_servers.json]
+    F --> G{For each server}
+    G -->|success| H[get_tools]
+    G -->|fail| I[log + skip]
+    H --> J[set_mcp_tools<br/>module global]
+    I --> G
+    J --> K[log: Agent ready]
+    K --> L[Accept requests]
+```
 
 ```python
 @asynccontextmanager
@@ -63,9 +78,10 @@ async def lifespan(_app: FastAPI):
     yield
 ```
 
-Skills are discovered from `agent/skills/`. MCP tools are loaded from
-`mcp_servers.json` (or `MCP_SERVERS_CONFIG`). Both are made available
-to the graph via global registries.
+Skills are discovered from `agent/skills/` (see [skills.md](./skills.md)).
+MCP tools are loaded from `mcp_servers.json` (see
+[mcp-servers.md](./mcp-servers.md)). Both are made available to the
+graph via globals.
 
 ### Streaming
 
@@ -113,7 +129,23 @@ without a restart.
 
 ## Tool registry
 
-Tools are merged from three sources:
+Tools are merged from four sources at request time:
+
+```mermaid
+flowchart LR
+    W[WIDGET_TOOLS<br/>create_summary_card<br/>create_timeseries_chart<br/>create_log_tail<br/>create_confirmation]
+    A[AWS_TOOLS<br/>list_lambda_functions<br/>list_log_groups<br/>list_ec2_instances<br/>get_aws_account_summary]
+    S[SKILLS_TOOLS<br/>invoke_skill]
+    M[_mcp_tools<br/>aws_docs_*<br/>remote_*<br/>github_*<br/>...]
+
+    W --> N[NATIVE_TOOLS<br/>compiled at module load]
+    A --> N
+    S --> N
+    N --> ALL["_all_tools()"]
+    M -. set at startup .-> ALL
+    ALL --> R[respond node<br/>bind_tools]
+    ALL --> T[tools node<br/>ToolNode]
+```
 
 ```python
 NATIVE_TOOLS = [*WIDGET_TOOLS, *AWS_TOOLS, *SKILLS_TOOLS]
@@ -211,3 +243,7 @@ exist for inconsistencies in the LangGraph and boto3 stubs.
 ```bash
 cd agent && uv run mypy agent/
 ```
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Architecture](./architecture.md) · [Next: Frontend →](./frontend.md)

@@ -70,6 +70,29 @@ restart the agent.
 
 ## How the agent uses skills
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant SP as System Prompt
+    participant L as LLM (Claude)
+    participant T as invoke_skill tool
+    participant SL as Skills Loader
+
+    Note over SL: At startup:<br/>load_skills() reads SKILL.md files<br/>into module-level dict
+
+    Note over SP: skills_summary() injects<br/>(name, description) for each skill
+
+    U->>L: "Find errors in CloudWatch logs"
+    L->>L: matches cloudwatch-query-builder<br/>description in system prompt
+    L->>T: invoke_skill("cloudwatch-query-builder")
+    T->>SL: get_skill(name)
+    SL-->>T: full skill body (markdown)
+    T-->>L: skill body as ToolMessage
+    L->>L: follows runbook from body
+    L-->>U: response following skill workflow<br/>(builds query, renders widget, etc.)
+```
+
 The system prompt is composed at request time:
 
 ```python
@@ -209,3 +232,7 @@ capabilities; skills give it institutional knowledge.
 - Tool: `agent/agent/tools/skills_tools.py`
 - System prompt augmentation: `agent/agent/graph.py::respond`
 - Lifespan hook: `agent/agent/main.py::lifespan`
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: MCP Servers](./mcp-servers.md) · [Next: Configuration →](./configuration.md)

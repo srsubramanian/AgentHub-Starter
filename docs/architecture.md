@@ -21,29 +21,66 @@ agui-starter/
 
 ## Request flow — single message
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User (Browser)
+    participant H as useAgent Hook
+    participant R as Next.js Route Handler
+    participant F as FastAPI /agent/run
+    participant G as LangGraph
+    participant L as Bedrock (Claude)
+    participant T as Tool function
+
+    U->>H: types message
+    H->>R: POST /api/agent/run<br/>(RunAgentInput)
+    R->>F: POST /agent/run (SSE proxy)
+    F->>G: graph.astream(messages, custom)
+    G->>L: bind_tools + ainvoke
+    L-->>G: AIMessageChunk(s)
+    G-->>F: yield ("messages", chunk)
+    F-->>R: data: TEXT_MESSAGE_CONTENT...
+    R-->>H: SSE proxied
+    H->>H: dispatch APPEND_TEXT
+    L-->>G: AIMessage with tool_calls
+    G->>T: tool execution
+    T->>T: writer(CustomEvent)
+    G-->>F: yield ("custom", CustomEvent)
+    F-->>R: data: CUSTOM widget_create...
+    R-->>H: SSE proxied
+    H->>H: dispatch WIDGET_CREATE
+    H-->>U: render text + widget
+```
+
+Step by step:
+
 1. **User types** in the chat composer
-2. **`useAgent` hook** in `lib/use-agent.ts` builds an AG-UI `RunAgentInput`
-   payload (`threadId`, `runId`, `messages`, etc.) and POSTs to `/api/agent/run`
-3. **Next.js Route Handler** (`app/api/agent/run/route.ts`) is a thin
-   reverse proxy — it forwards the POST to the FastAPI agent and pipes
-   the SSE response back to the browser
-4. **FastAPI endpoint** (`agent/agent/main.py`) calls the LangGraph
-   `graph.astream()` with `stream_mode=["messages", "custom"]`, yielding:
+2. **`useAgent` hook** in [`lib/use-agent.ts`](../lib/use-agent.ts) builds an AG-UI `RunAgentInput` payload and POSTs to `/api/agent/run`
+3. **Next.js Route Handler** ([`app/api/agent/run/route.ts`](../app/api/agent/run/route.ts)) is a thin reverse proxy — it forwards the POST to FastAPI and pipes the SSE response back
+4. **FastAPI endpoint** ([`agent/agent/main.py`](../agent/agent/main.py)) calls `graph.astream(stream_mode=["messages", "custom"])`:
    - LLM token chunks (`messages` mode) → `TEXT_MESSAGE_CONTENT` events
-   - Custom events written by tools (`custom` mode) → passed through
-5. **LangGraph** runs the `respond → tools → respond` loop:
-   - `respond` calls Claude (`ChatBedrockConverse`) with all tools bound
-   - if Claude calls a tool, `tools` node executes it
-   - tools that affect the canvas (widget creation, AWS lookups) write
-     `CustomEvent` objects via the LangGraph `StreamWriter`
-6. **Back in the browser**, `@ag-ui/client`'s `HttpAgent` parses the SSE
-   stream and dispatches callbacks: `onTextMessageContentEvent`,
-   `onCustomEvent`, etc.
-7. **`agentReducer`** in `lib/agent-reducer.ts` handles each action:
-   - `APPEND_TEXT` → appends to assistant message
-   - `WIDGET_CREATE` → adds a widget to canvas
-   - `WIDGET_UPDATE` → applies JSON Patch to a widget
-   - `WIDGET_REMOVE` → removes a widget
+   - Custom events from tools (`custom` mode) → passed through
+5. **LangGraph** runs the `respond → tools → respond` loop (see state diagram below)
+6. **Back in the browser**, `@ag-ui/client`'s `HttpAgent` parses the SSE stream and dispatches callbacks
+7. **`agentReducer`** in [`lib/agent-reducer.ts`](../lib/agent-reducer.ts) handles each action and updates state
+
+## LangGraph state graph
+
+```mermaid
+stateDiagram-v2
+    [*] --> respond: START
+    respond --> tools: should_continue<br/>(has tool_calls)
+    respond --> [*]: should_continue<br/>(no tool_calls)
+    tools --> respond: ToolMessage
+```
+
+- **`respond`** calls Claude with all tools bound
+- **`should_continue`** routes based on whether the AIMessage has `tool_calls`
+- **`tools`** is a `ToolNode` wrapped in a callable so it sees the runtime
+  (native + MCP) tool list
+
+See [backend.md](./backend.md) for implementation, [tools.md](./tools.md)
+for the tool categories.
 
 ## Stream modes
 
@@ -133,3 +170,7 @@ change because LangGraph's checkpointer interface is uniform.
 - **shadcn/ui** components are owned, not imported — easy to customize.
 - **Skills + MCP** keep the agent's capabilities composable and
   user-extendable.
+
+---
+
+[← Back to docs index](./README.md) · [← Previous: Getting Started](./getting-started.md) · [Next: Backend →](./backend.md)
