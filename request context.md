@@ -1,0 +1,896 @@
+# Build Spec: RequestContext for an Existing FastAPI + LangGraph App
+
+**Status:** Phase 1 (mocked entitlements, header-trust authentication)
+**Audience:** Claude Code or a developer extending an existing application
+**Deliverable:** Three Python modules and an integration patch for an existing FastAPI app with a LangGraph-based agent runtime
+
+---
+
+## What this spec covers
+
+This spec is **scoped to identity threading only** — building the `RequestContext` object and getting it from the HTTP request through to LangGraph tool calls. It does not cover:
+
+- The Snowflake connection module
+- The SQL firewall (already implemented separately)
+- Snowflake DDL or row access policies
+- The real entitlement-store integration (Phase 2)
+
+The deliverable is the smallest possible piece that puts trusted identity into your agent's hands. Tools downstream will consume `RequestContext` from LangGraph state; what they do with it (calling Snowflake, calling other services) is out of scope for this spec.
+
+---
+
+## What you're integrating with
+
+This spec assumes:
+
+- An existing FastAPI app, with at least one endpoint that accepts a user prompt and runs it through a LangGraph workflow
+- A LangGraph workflow with a typed state object (TypedDict, dataclass, or Pydantic) and one or more tool nodes
+- Some existing authentication mechanism, or none yet (Phase 1 trusts a header; you'll replace this in Phase 2)
+
+What you'll add:
+
+- A `RequestContext` dataclass — the immutable identity carrier
+- An `EntitlementClient` Protocol and a mock implementation backed by env vars
+- A FastAPI middleware that builds `RequestContext` per request
+- A pattern for getting `RequestContext` into LangGraph state and accessible from tools
+
+---
+
+## Architectural assumptions (read these first)
+
+The whole point of `RequestContext` is to enforce one property:
+
+> **Verified end-user identity reaches the agent's tools without ever passing through any code path that handles untrusted input.**
+
+For that property to hold, the implementation must obey four rules. These are non-negotiable; the rest of the spec exists to support them.
+
+1. **`RequestContext` is constructed in exactly one place** — the auth middleware. Tools, LangGraph nodes, the LLM, retry logic, and tests-other-than-middleware-tests do not construct one.
+
+2. **The fields come from authenticated channels only.** `user_id` from the request's authentication; `allowed_entities` from the entitlement store. Never from the request body, query parameters, chat content, or anywhere user-controllable.
+
+3. **The object is immutable for the lifetime of the request.** `frozen=True`, `tuple` instead of `list`, `frozenset` instead of `set`. Mutation attempts raise.
+
+4. **Tools take `RequestContext` as an injected parameter, not as an LLM-fillable argument.** The LLM never sees `user_id`, `allowed_entities`, or anything derived from them in its tool schemas.
+
+If any rule is violated, the property breaks — and most of the security architecture downstream depends on it.
+
+---
+
+## Module layout
+
+Three new Python modules, plus integration changes to your existing app. Place them wherever your existing code lives; the suggested location is a small `auth/` subpackage:
+
+```
+your_app/
+├── auth/
+│   ├── __init__.py             # public exports
+│   ├── context.py              # RequestContext + Entitlements + Protocol
+│   ├── entitlement_envvar.py   # Phase 1 mock client
+│   ├── middleware.py           # FastAPI middleware
+│   └── errors.py               # custom exceptions
+├── ...                         # your existing modules
+└── tests/
+    └── auth/
+        ├── test_context.py
+        ├── test_entitlement_envvar.py
+        └── test_middleware.py
+```
+
+---
+
+## Module 1: `errors.py`
+
+```python
+"""Exceptions for the auth subsystem."""
+
+
+class EntitlementError(Exception):
+    """The entitlement client could not produce valid entitlements.
+
+    Caller treats this as fail-closed (refuse the request).
+    """
+```
+
+That's it. One exception. The middleware translates it to an HTTP response.
+
+---
+
+## Module 2: `context.py`
+
+The `RequestContext` dataclass and the entitlement-related types.
+
+```python
+"""RequestContext — immutable per-request identity.
+
+A RequestContext is built ONCE, in auth middleware, after the user is
+authenticated and entitlements have been fetched. It is immutable for
+the lifetime of the request and is the single source of truth for
+who the current user is and what entities they may access.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+
+@dataclass(frozen=True)
+class RequestContext:
+    """Immutable per-request identity and authorization state.
+
+    Fields:
+        user_id: Stable identifier for the authenticated user.
+            Comes from authenticated channels (cookie, gateway header,
+            mTLS client cert), never from request body or chat input.
+        request_id: Unique ID for this request, generated by middleware.
+            Used in audit logs and as a correlation key.
+        allowed_entities: Tuple of entity IDs (digits as strings) the
+            user is currently authorized to access. Filled from the
+            entitlement client at middleware time.
+        roles: User's roles for downstream authorization decisions
+            (HITL approval, etc.). Reserved for the agent runtime.
+    """
+    user_id: str
+    request_id: str
+    allowed_entities: tuple[str, ...]
+    roles: frozenset[str]
+
+    def __post_init__(self) -> None:
+        if not self.user_id:
+            raise ValueError("user_id is required")
+        if not self.request_id:
+            raise ValueError("request_id is required")
+        if not isinstance(self.allowed_entities, tuple):
+            raise TypeError("allowed_entities must be a tuple")
+        if not isinstance(self.roles, frozenset):
+            raise TypeError("roles must be a frozenset")
+
+
+@dataclass(frozen=True)
+class Entitlements:
+    """The entitlement client's response, normalized.
+
+    Phase 1: built by the env-var mock.
+    Phase 2: returned by the real entitlement-store client.
+    Either way, the consumer (auth middleware) sees the same shape.
+    """
+    user_id: str
+    allowed_entities: tuple[str, ...]
+    roles: frozenset[str]
+
+
+class EntitlementClient(Protocol):
+    """The contract any entitlement client must satisfy.
+
+    Implementations must:
+      - Validate the response shape (digit-only entities, etc.)
+      - Raise EntitlementError on any failure (do NOT return None)
+      - Be safe to call concurrently (Phase 2 caching may share state)
+    """
+
+    def get_entitlements(
+        self,
+        user_id: str,
+        request_id: str,
+    ) -> Entitlements:
+        ...
+```
+
+---
+
+## Module 3: `entitlement_envvar.py`
+
+Phase 1 mock. Reads from environment variables, validates the same way the real client will.
+
+```python
+"""Phase 1 mock entitlement client backed by environment variables.
+
+REPLACE WITH A REAL CLIENT IN PHASE 2. The Protocol in context.py is
+the contract; this is a stand-in that lets the rest of the app be built
+without an entitlement-store dependency.
+
+Configuration via env vars — two supported forms:
+
+  Form 1 — Multi-user JSON (preferred for testing isolation):
+    ENTITLEMENT_MOCK_USERS='{
+      "alice@test": {
+        "allowed_entities": ["42", "99"],
+        "roles": ["analyst"]
+      },
+      "bob@test": {
+        "allowed_entities": ["100"],
+        "roles": ["analyst"]
+      }
+    }'
+
+  Form 2 — Single-user flat (preferred for local dev):
+    ENTITLEMENT_MOCK_USER_ID=alice@test
+    ENTITLEMENT_MOCK_ALLOWED_ENTITIES=42,99
+    ENTITLEMENT_MOCK_ROLES=analyst
+
+If both are set, Form 1 (JSON) takes precedence.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+
+from .context import Entitlements
+from .errors import EntitlementError
+
+log = logging.getLogger(__name__)
+
+
+class EnvVarEntitlementClient:
+    """Mock implementation of EntitlementClient for Phase 1."""
+
+    def __init__(self) -> None:
+        self._users = self._load()
+        if not self._users:
+            raise EntitlementError(
+                "no entitlement mock configuration found; set "
+                "ENTITLEMENT_MOCK_USERS or ENTITLEMENT_MOCK_USER_ID"
+            )
+
+    def get_entitlements(
+        self,
+        user_id: str,
+        request_id: str,
+    ) -> Entitlements:
+        log.info(
+            "mock_entitlement_lookup",
+            extra={"request_id": request_id, "user_id": user_id},
+        )
+
+        if user_id not in self._users:
+            raise EntitlementError(
+                f"no entitlements configured for user {user_id!r}"
+            )
+
+        return _build_entitlements(user_id=user_id, record=self._users[user_id])
+
+    @staticmethod
+    def _load() -> dict[str, dict]:
+        full = os.environ.get("ENTITLEMENT_MOCK_USERS")
+        if full:
+            try:
+                parsed = json.loads(full)
+            except json.JSONDecodeError as e:
+                raise EntitlementError(
+                    f"ENTITLEMENT_MOCK_USERS is not valid JSON: {e}"
+                ) from e
+            if not isinstance(parsed, dict):
+                raise EntitlementError(
+                    "ENTITLEMENT_MOCK_USERS must be a JSON object"
+                )
+            return parsed
+
+        user_id = os.environ.get("ENTITLEMENT_MOCK_USER_ID")
+        if not user_id:
+            return {}
+
+        entities_csv = os.environ.get("ENTITLEMENT_MOCK_ALLOWED_ENTITIES", "")
+        roles_csv = os.environ.get("ENTITLEMENT_MOCK_ROLES", "")
+
+        return {
+            user_id: {
+                "allowed_entities": [
+                    e.strip() for e in entities_csv.split(",") if e.strip()
+                ],
+                "roles": [
+                    r.strip() for r in roles_csv.split(",") if r.strip()
+                ],
+            }
+        }
+
+
+def _build_entitlements(user_id: str, record: dict) -> Entitlements:
+    """Validate the record and build an Entitlements object.
+
+    Validation matches what a real HTTP client should do: digit-only
+    entity IDs, list types, non-empty allowed list. Keeping validation
+    close to the mock means swapping to a real client is a one-file
+    change with the same validation behavior.
+    """
+    try:
+        entities = record["allowed_entities"]
+        roles = record.get("roles", [])
+    except KeyError as e:
+        raise EntitlementError(
+            f"malformed mock record for {user_id}: missing {e}"
+        ) from e
+
+    if not isinstance(entities, list):
+        raise EntitlementError("allowed_entities must be a list")
+
+    validated: list[str] = []
+    for e in entities:
+        s = str(e)
+        if not s.isdigit():
+            raise EntitlementError(
+                f"invalid entity_id: {e!r} (must be digits)"
+            )
+        validated.append(s)
+
+    if not validated:
+        raise EntitlementError(f"user {user_id} has no allowed entities")
+
+    return Entitlements(
+        user_id=user_id,
+        allowed_entities=tuple(validated),
+        roles=frozenset(str(r) for r in roles),
+    )
+```
+
+---
+
+## Module 4: `middleware.py`
+
+The FastAPI middleware. Builds `RequestContext` and attaches it to `request.state`.
+
+```python
+"""FastAPI middleware that authenticates the user and builds RequestContext.
+
+THIS IS THE TRUST BOUNDARY. RequestContext is constructed here and
+nowhere else. Tools and LangGraph nodes access it via state, never
+build it directly.
+
+Phase 1 authentication: trusts the X-Authenticated-User header. This is
+ONLY safe in environments where the agent runtime is reachable solely
+through a trusted gateway (a service mesh, a private VPC behind an ALB
+with OIDC). In dev, the developer sets the header manually with curl.
+
+Phase 2: replace _authenticate() with real authentication
+(session cookie verification, mTLS client identity, gateway-injected
+JWT). The rest of the middleware is unchanged.
+"""
+from __future__ import annotations
+
+import logging
+import uuid
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+from .context import EntitlementClient, RequestContext
+from .errors import EntitlementError
+
+log = logging.getLogger(__name__)
+
+_client: EntitlementClient | None = None
+
+
+def configure_entitlement_client(client: EntitlementClient) -> None:
+    """Inject the entitlement client at app startup.
+
+    Phase 1: pass an EnvVarEntitlementClient.
+    Phase 2: pass an HTTP-based client.
+    """
+    global _client
+    _client = client
+
+
+async def auth_middleware(request: Request, call_next):
+    """The single construction site for RequestContext.
+
+    Steps:
+      1. Generate or extract request_id
+      2. Authenticate the user (Phase 1: trust header)
+      3. Fetch entitlements from the configured client
+      4. Build immutable RequestContext
+      5. Attach to request.state for downstream consumers
+
+    All failure paths are fail-closed:
+      - 401 if not authenticated
+      - 503 if entitlement client raises
+      - 500 if middleware was misconfigured
+    """
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
+    user_id = _authenticate(request)
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "not_authenticated"},
+        )
+
+    if _client is None:
+        log.error("entitlement_client_not_configured")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "server_misconfigured"},
+        )
+
+    try:
+        ents = _client.get_entitlements(
+            user_id=user_id,
+            request_id=request_id,
+        )
+    except EntitlementError as e:
+        log.warning(
+            "entitlement_lookup_failed",
+            extra={"request_id": request_id, "user_id": user_id},
+            exc_info=e,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"error": "authorization_unavailable"},
+        )
+
+    ctx = RequestContext(
+        user_id=user_id,
+        request_id=request_id,
+        allowed_entities=ents.allowed_entities,
+        roles=ents.roles,
+    )
+    request.state.ctx = ctx
+
+    log.info(
+        "request_authorized",
+        extra={
+            "request_id": request_id,
+            "entity_count": len(ents.allowed_entities),
+            # user_id deliberately not at INFO; available at DEBUG
+        },
+    )
+
+    return await call_next(request)
+
+
+def _authenticate(request: Request) -> str | None:
+    """Phase 1: trust the X-Authenticated-User header.
+
+    PHASE 2: REPLACE THIS. Header trust is only safe when:
+      - The agent runtime is unreachable except through a trusted gateway
+      - The gateway authenticates the user and injects this header
+      - The gateway strips any client-supplied version of the header
+
+    For Phase 2, replace with one of:
+      - Signed session cookie verification
+      - mTLS client certificate identity
+      - JWT verification
+
+    Whichever you choose, the function's contract is the same:
+      input: a Request
+      output: the authenticated user_id (string), or None if unauthenticated
+    """
+    return request.headers.get("x-authenticated-user")
+```
+
+---
+
+## Module 5: `__init__.py`
+
+Public exports.
+
+```python
+"""Auth subsystem — RequestContext building and threading."""
+
+from .context import EntitlementClient, Entitlements, RequestContext
+from .entitlement_envvar import EnvVarEntitlementClient
+from .errors import EntitlementError
+from .middleware import auth_middleware, configure_entitlement_client
+
+__all__ = [
+    "RequestContext",
+    "Entitlements",
+    "EntitlementClient",
+    "EnvVarEntitlementClient",
+    "auth_middleware",
+    "configure_entitlement_client",
+    "EntitlementError",
+]
+```
+
+---
+
+## Integrating with your existing FastAPI app
+
+Two changes to your existing app's startup:
+
+```python
+# wherever your FastAPI app is created (often main.py or app.py)
+from your_app.auth import (
+    EnvVarEntitlementClient,
+    auth_middleware,
+    configure_entitlement_client,
+)
+
+app = FastAPI()  # your existing app
+
+# Add these two lines — order matters: configure before installing
+configure_entitlement_client(EnvVarEntitlementClient())
+app.middleware("http")(auth_middleware)
+
+# ... your existing routes
+```
+
+That's it on the app side. Every request that hits a route now has `request.state.ctx` populated, or has been rejected with 401/503.
+
+---
+
+## Threading RequestContext into LangGraph
+
+This is where most teams slip. The LLM produces tool-call arguments; if `entity_id` or `user_id` is in those arguments, the LLM gets to choose them — which defeats the entire point of building `RequestContext` in the middleware.
+
+The pattern: put `ctx` into LangGraph state, give tools access to state, do not put `ctx` in the tools' LLM-visible argument schemas.
+
+### Step 1: include `ctx` in your LangGraph state
+
+If your state is a TypedDict:
+
+```python
+from typing import TypedDict, Annotated
+from langgraph.graph.message import add_messages
+from your_app.auth import RequestContext
+
+
+class AgentState(TypedDict):
+    """The LangGraph state. ctx is set once at graph entry; never mutated."""
+    ctx: RequestContext
+    messages: Annotated[list, add_messages]
+    # ... whatever else your graph carries
+```
+
+If you're using a Pydantic model or dataclass for state, add `ctx: RequestContext` similarly. The point is that `ctx` is part of the state from the first node forward.
+
+### Step 2: populate state at the route handler
+
+The route handler reads `ctx` from `request.state` (where the middleware put it) and passes it into the graph as part of the initial state:
+
+```python
+from fastapi import Request, HTTPException
+
+@app.post("/api/agent/query")
+async def agent_query(request: Request):
+    ctx = request.state.ctx                  # built by middleware
+    body = await request.json()
+
+    initial_state: AgentState = {
+        "ctx": ctx,
+        "messages": [{"role": "user", "content": body["question"]}],
+    }
+
+    final_state = await your_compiled_graph.ainvoke(initial_state)
+    return {"answer": final_state["messages"][-1]["content"]}
+```
+
+`ctx` enters the graph here and is available to every node thereafter.
+
+### Step 3: write tools that read `ctx` from state, not from arguments
+
+This is the critical pattern. Use LangGraph's `InjectedState` annotation (from `langgraph.prebuilt`) so the LLM doesn't see `ctx` in the tool's argument schema:
+
+```python
+from typing import Annotated
+from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
+
+from your_app.auth import RequestContext
+
+
+@tool
+def get_revenue(
+    start_date: str,
+    end_date: str,
+    state: Annotated[dict, InjectedState],
+) -> list[dict]:
+    """Get revenue between start_date and end_date.
+
+    The LLM only sees start_date and end_date in this tool's schema.
+    `state` is injected by LangGraph; the LLM never fills it.
+    """
+    ctx: RequestContext = state["ctx"]
+    # ctx.user_id and ctx.allowed_entities are now available
+    # for use in downstream calls (Snowflake, etc.) — out of scope here
+
+    # ... do the actual work, using ctx for identity ...
+    return []
+```
+
+The LLM, looking at this tool's schema, sees only `start_date` and `end_date` as arguments. `state` is invisible to it. `ctx` is read from injected state, never from LLM output.
+
+If you're not using `create_react_agent` or another helper that handles InjectedState natively, you can do the equivalent with a manual tool node that pulls `ctx` from state and passes it explicitly to your tool functions:
+
+```python
+def tool_node(state: AgentState) -> dict:
+    ctx = state["ctx"]
+    last_message = state["messages"][-1]
+    tool_call = last_message.tool_calls[0]
+    tool_name = tool_call["name"]
+    tool_args = tool_call["args"]   # only LLM-visible args
+
+    # Dispatch to the right tool, always passing ctx as a keyword arg
+    if tool_name == "get_revenue":
+        result = get_revenue(ctx=ctx, **tool_args)
+    elif tool_name == "get_transactions":
+        result = get_transactions(ctx=ctx, **tool_args)
+    else:
+        raise ValueError(f"unknown tool: {tool_name}")
+
+    return {"messages": [{"role": "tool", "content": str(result)}]}
+```
+
+The `tool_args` dict only contains what the LLM produced. `ctx` is added by the dispatcher from state. The tool function's signature is `def get_revenue(start_date, end_date, ctx)`, with `ctx` after the LLM-visible args so the LLM has no way to provide it.
+
+Whichever pattern you use (InjectedState or manual dispatch), the rule is the same: **the LLM never sees `ctx` in any schema it parses.**
+
+---
+
+## Testing
+
+### `tests/auth/test_context.py`
+
+```python
+import pytest
+from your_app.auth import RequestContext
+
+
+def test_construction():
+    ctx = RequestContext(
+        user_id="alice@test",
+        request_id="req-1",
+        allowed_entities=("42", "99"),
+        roles=frozenset({"analyst"}),
+    )
+    assert ctx.user_id == "alice@test"
+    assert ctx.allowed_entities == ("42", "99")
+
+
+def test_immutable():
+    ctx = RequestContext(
+        user_id="alice@test", request_id="req-1",
+        allowed_entities=("42",), roles=frozenset(),
+    )
+    with pytest.raises(Exception):  # FrozenInstanceError
+        ctx.user_id = "bob@test"
+
+
+def test_required_fields():
+    with pytest.raises(ValueError):
+        RequestContext(user_id="", request_id="r",
+                       allowed_entities=(), roles=frozenset())
+    with pytest.raises(ValueError):
+        RequestContext(user_id="a", request_id="",
+                       allowed_entities=(), roles=frozenset())
+
+
+def test_type_enforcement():
+    with pytest.raises(TypeError):
+        RequestContext(
+            user_id="a", request_id="r",
+            allowed_entities=["42"],   # list, not tuple
+            roles=frozenset(),
+        )
+    with pytest.raises(TypeError):
+        RequestContext(
+            user_id="a", request_id="r",
+            allowed_entities=("42",),
+            roles={"analyst"},          # set, not frozenset
+        )
+```
+
+### `tests/auth/test_entitlement_envvar.py`
+
+```python
+import json
+import pytest
+
+from your_app.auth import EnvVarEntitlementClient, EntitlementError
+
+
+def test_single_user_form(monkeypatch):
+    monkeypatch.setenv("ENTITLEMENT_MOCK_USER_ID", "alice@test")
+    monkeypatch.setenv("ENTITLEMENT_MOCK_ALLOWED_ENTITIES", "42,99,113")
+    monkeypatch.setenv("ENTITLEMENT_MOCK_ROLES", "analyst,reviewer")
+    monkeypatch.delenv("ENTITLEMENT_MOCK_USERS", raising=False)
+
+    client = EnvVarEntitlementClient()
+    ents = client.get_entitlements("alice@test", "req-1")
+
+    assert ents.user_id == "alice@test"
+    assert ents.allowed_entities == ("42", "99", "113")
+    assert ents.roles == frozenset({"analyst", "reviewer"})
+
+
+def test_multi_user_form(monkeypatch):
+    monkeypatch.setenv("ENTITLEMENT_MOCK_USERS", json.dumps({
+        "alice@test": {"allowed_entities": ["42", "99"], "roles": ["analyst"]},
+        "bob@test": {"allowed_entities": ["100"], "roles": []},
+    }))
+    monkeypatch.delenv("ENTITLEMENT_MOCK_USER_ID", raising=False)
+
+    client = EnvVarEntitlementClient()
+
+    alice = client.get_entitlements("alice@test", "req-1")
+    assert alice.allowed_entities == ("42", "99")
+
+    bob = client.get_entitlements("bob@test", "req-2")
+    assert bob.allowed_entities == ("100",)
+
+
+def test_unknown_user_raises(monkeypatch):
+    monkeypatch.setenv("ENTITLEMENT_MOCK_USER_ID", "alice@test")
+    monkeypatch.setenv("ENTITLEMENT_MOCK_ALLOWED_ENTITIES", "42")
+    monkeypatch.delenv("ENTITLEMENT_MOCK_USERS", raising=False)
+
+    client = EnvVarEntitlementClient()
+    with pytest.raises(EntitlementError):
+        client.get_entitlements("eve@test", "req-1")
+
+
+def test_no_config_raises(monkeypatch):
+    monkeypatch.delenv("ENTITLEMENT_MOCK_USERS", raising=False)
+    monkeypatch.delenv("ENTITLEMENT_MOCK_USER_ID", raising=False)
+    with pytest.raises(EntitlementError):
+        EnvVarEntitlementClient()
+
+
+def test_invalid_entity_id_rejected(monkeypatch):
+    monkeypatch.setenv("ENTITLEMENT_MOCK_USERS", json.dumps({
+        "alice@test": {"allowed_entities": ["42; DROP TABLE x"], "roles": []},
+    }))
+    client = EnvVarEntitlementClient()
+    with pytest.raises(EntitlementError, match="invalid entity_id"):
+        client.get_entitlements("alice@test", "req-1")
+
+
+def test_empty_entities_rejected(monkeypatch):
+    monkeypatch.setenv("ENTITLEMENT_MOCK_USERS", json.dumps({
+        "alice@test": {"allowed_entities": [], "roles": []},
+    }))
+    client = EnvVarEntitlementClient()
+    with pytest.raises(EntitlementError, match="no allowed entities"):
+        client.get_entitlements("alice@test", "req-1")
+```
+
+### `tests/auth/test_middleware.py`
+
+```python
+import pytest
+from unittest.mock import MagicMock
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from your_app.auth import (
+    Entitlements,
+    auth_middleware,
+    configure_entitlement_client,
+)
+from your_app.auth.errors import EntitlementError
+
+
+def make_app(client) -> TestClient:
+    app = FastAPI()
+    configure_entitlement_client(client)
+    app.middleware("http")(auth_middleware)
+
+    @app.get("/whoami")
+    def whoami(request):  # type: ignore
+        ctx = request.state.ctx
+        return {
+            "user_id": ctx.user_id,
+            "allowed_entities": list(ctx.allowed_entities),
+            "request_id": ctx.request_id,
+        }
+
+    return TestClient(app)
+
+
+def test_authenticated_request_builds_context():
+    mock = MagicMock()
+    mock.get_entitlements.return_value = Entitlements(
+        user_id="alice@test",
+        allowed_entities=("42", "99"),
+        roles=frozenset({"analyst"}),
+    )
+    app = make_app(mock)
+
+    response = app.get(
+        "/whoami",
+        headers={"X-Authenticated-User": "alice@test"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_id"] == "alice@test"
+    assert body["allowed_entities"] == ["42", "99"]
+
+
+def test_unauthenticated_request_rejected():
+    app = make_app(MagicMock())
+    response = app.get("/whoami")
+    assert response.status_code == 401
+
+
+def test_entitlement_failure_yields_503():
+    mock = MagicMock()
+    mock.get_entitlements.side_effect = EntitlementError("store down")
+    app = make_app(mock)
+
+    response = app.get(
+        "/whoami",
+        headers={"X-Authenticated-User": "alice@test"},
+    )
+    assert response.status_code == 503
+```
+
+---
+
+## Local-dev `.env`
+
+```bash
+ENTITLEMENT_MOCK_USER_ID=alice@yourcompany.com
+ENTITLEMENT_MOCK_ALLOWED_ENTITIES=42,99,113
+ENTITLEMENT_MOCK_ROLES=analyst
+```
+
+Test request:
+
+```bash
+curl -X POST http://localhost:8000/api/agent/query \
+  -H "X-Authenticated-User: alice@yourcompany.com" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "what is my revenue this quarter?"}'
+```
+
+To test isolation between users, switch to the multi-user form:
+
+```bash
+ENTITLEMENT_MOCK_USERS='{
+  "alice@yourcompany.com": {"allowed_entities": ["42", "99"], "roles": ["analyst"]},
+  "bob@yourcompany.com": {"allowed_entities": ["100"], "roles": ["analyst"]}
+}'
+```
+
+Then send requests with each user's header value and verify they reach different `ctx.allowed_entities` in the LangGraph nodes.
+
+---
+
+## Acceptance criteria
+
+The implementation is complete when:
+
+1. All tests in `tests/auth/` pass.
+2. `RequestContext` is constructed only in `middleware.py`. Verify with: `grep -rn "RequestContext(" --include="*.py" your_app/` — only `middleware.py` and tests should appear.
+3. No tool function takes `entity_id`, `user_id`, or `allowed_entities` as a parameter the LLM can supply.
+4. A request with no `X-Authenticated-User` header returns 401.
+5. A request with an unknown user (not in the mock config) returns 503.
+6. A request with a known user reaches a tool node with `state["ctx"]` populated correctly.
+7. The LLM's view of any tool's schema does not include `ctx`, `user_id`, `entity_id`, or `allowed_entities`.
+
+If all seven hold, this piece is ready. Move on to the next component (Snowflake connection module, etc.) when you're ready.
+
+---
+
+## What's deferred
+
+Captured here so nothing gets lost between phases:
+
+1. **Real authentication.** Replace `_authenticate` with whatever your real mechanism will be (session cookie, mTLS, gateway-verified header).
+2. **Real entitlement client.** Build an HTTP client implementing `EntitlementClient`, talking to the actual entitlement store. Drop it in via `configure_entitlement_client`.
+3. **Caching.** The real client probably needs a per-user TTL cache. Document the staleness window.
+4. **Audit logging.** Structured logs that join with the entitlement store's logs by `request_id` to reconstruct authorization decisions.
+
+None of these block the Phase 1 build. The shape of `RequestContext` and the construction discipline don't change.
+
+---
+
+## Common pitfalls
+
+1. **Building `RequestContext` somewhere other than middleware.** Tools, LangGraph nodes, scripts, retry logic — none of these construct one. They consume `state["ctx"]`.
+
+2. **Putting `entity_id` in a tool's argument schema.** The LLM will eventually pass the wrong value. Tools take `state` (or `ctx`) as an injected/keyword parameter that the LLM cannot fill.
+
+3. **Mutating `RequestContext`.** It's frozen. Trying to "update" it should raise; if you need a different ctx, build a new one — but the only place that should happen is middleware.
+
+4. **Reading `user_id` from the request body.** It comes from the verified authentication channel only. The body, query params, and chat content are all untrusted.
+
+5. **Logging `user_id` at INFO.** It's PII in some environments. Use DEBUG with separate retention.
+
+6. **Caching `EnvVarEntitlementClient` results across processes.** It's per-process by design; restart clears it. Don't add Redis.
+
+7. **Skipping the `_post_init__` validation.** It catches type errors at construction; without it, a bug in middleware can produce a `RequestContext` with a list instead of a tuple, which downstream code assumes is hashable.
+
+End of spec.
